@@ -1,4 +1,4 @@
 gocov
 =====
 
-Coverage testing tool for The Go Programming Language
+Coverage testing tool for The Go Programming Language (work-in-progress)
