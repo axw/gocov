@@ -1,22 +1,22 @@
 // Copyright (c) 2012 The Gocov Authors.
 // 
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-// of the Software, and to permit persons to whom the Software is furnished to do
-// so, subject to the following conditions:
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 // 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 // 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 package gocov
 
@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync/atomic"
 )
 
 var writer io.Writer
@@ -47,10 +48,10 @@ type Function struct {
 	Statements []*Statement
 
 	// number of times the function has been entered.
-	Entered int
+	Entered int64
 
 	// number of times the function has been left.
-	Left int
+	Left int64
 }
 
 type Statement struct {
@@ -58,7 +59,7 @@ type Statement struct {
 	Line int
 
 	// number of times the statement was reached.
-	Reached int
+	Reached int64
 }
 
 func init() {
@@ -95,30 +96,29 @@ func logf(format string, args ...interface{}) {
 // new *Function.
 func RegisterFunction(name, file string, line int) *Function {
 	f := &Function{Object: Object{allocUid()}, Name: name, File: file, Line: line}
-	logf("RegisterFunction(%#v, %#v, %d): %s\n", name, file, line, f)
+	//logf("RegisterFunction(%#v, %#v, %d): %s\n", name, file, line, f)
 	return f
 }
 
 func (f *Function) Enter() {
-	logf("%s.Enter()\n", f)
-	f.Entered++
+	//logf("%s.Enter()\n", f)
+	atomic.AddInt64(&f.Entered, 1)
 }
 
 func (f *Function) Leave() {
-	logf("%s.Leave()\n", f)
-	f.Left++
+	//logf("%s.Leave()\n", f)
+	atomic.AddInt64(&f.Left, 1)
 }
 
 func (f *Function) RegisterStatement(line int) *Statement {
 	s := &Statement{Object: Object{allocUid()}, Line: line}
 	f.Statements = append(f.Statements, s)
-	logf("%s.RegisterStatement(%d): %s\n", f, line, s)
+	//logf("%s.RegisterStatement(%d): %s\n", f, line, s)
 	return s
 }
 
 // At is called each time the statement is reached.
 func (s *Statement) At() {
-	logf("%s.At()\n", s)
-	s.Reached++
+	//logf("%s.At()\n", s)
+	atomic.AddInt64(&s.Reached, 1)
 }
-

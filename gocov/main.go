@@ -1,22 +1,22 @@
 // Copyright (c) 2012 The Gocov Authors.
 // 
-// Permission is hereby granted, free of charge, to any person obtaining a copy of
-// this software and associated documentation files (the "Software"), to deal in
-// the Software without restriction, including without limitation the rights to
-// use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-// of the Software, and to permit persons to whom the Software is furnished to do
-// so, subject to the following conditions:
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 // 
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 // 
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 package main
 
@@ -28,6 +28,7 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -45,7 +46,8 @@ func usage() {
 }
 
 type instrumenter struct {
-	gopath string // temporary gopath
+	gopath       string // temporary gopath
+	instrumented map[string]struct{}
 }
 
 func putenv(env []string, key, value string) []string {
@@ -55,7 +57,7 @@ func putenv(env []string, key, value string) []string {
 			return env
 		}
 	}
-	return append(env, key + "=" + value)
+	return append(env, key+"="+value)
 }
 
 func parsePackage(path string, fset *token.FileSet) (*build.Package, *ast.Package, error) {
@@ -97,7 +99,18 @@ func symlinkHierarchy(src, dst string) error {
 		} else {
 			err = os.Symlink(path, target)
 			if err != nil {
-				// TODO copy file
+				srcfile, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer srcfile.Close()
+				dstfile, err := os.OpenFile(
+					target, os.O_RDWR|os.O_CREATE, 0600)
+				if err != nil {
+					return err
+				}
+				defer dstfile.Close()
+				_, err = io.Copy(dstfile, srcfile)
 				return err
 			}
 		}
@@ -111,6 +124,11 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	buildpkg, pkg, err := parsePackage(pkgpath, fset)
 	if err != nil {
 		return err
+	}
+	in.instrumented[pkgpath] = struct{}{}
+	if buildpkg.Goroot {
+		// ignore packages in GOROOT
+		return nil
 	}
 
 	// Clone the directory structure, symlinking files (if possible),
@@ -131,10 +149,11 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 			if err != nil {
 				return err
 			}
-			file, err := os.OpenFile(filepath, os.O_RDWR | os.O_CREATE, 0600)
+			file, err := os.OpenFile(filepath, os.O_RDWR|os.O_CREATE, 0600)
 			if err != nil {
 				return err
 			}
+			//printer.Fprint(os.Stdout, fset, f) // TODO check err?
 			printer.Fprint(file, fset, f) // TODO check err?
 			err = file.Close()
 			if err != nil {
@@ -145,6 +164,19 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 			return err
 		}
 	}
+
+	// TODO include/exclude package names with a pattern.
+	for _, subpkgpath := range buildpkg.Imports {
+		// Make sure the package hasn't been instrumented yet (may be
+		// a transitive dependency).
+		if _, done := in.instrumented[subpkgpath]; !done {
+			err = in.instrumentPackage(subpkgpath)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -157,21 +189,25 @@ func instrumentAndTest(packageName string) (rc int) {
 	defer func() {
 		err := os.RemoveAll(tempDir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to delete temporary GOPATH (%s)", tempDir)
+			fmt.Fprintf(os.Stderr,
+				"warning: failed to delete temporary GOPATH (%s)", tempDir)
 		}
 	}()
 
 	err = os.Mkdir(filepath.Join(tempDir, "src"), 0700)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create temporary src directory: %s", err)
+		fmt.Fprintf(os.Stderr,
+			"failed to create temporary src directory: %s", err)
 		return 1
 	}
 
-	// TODO recursively instrument imported packages, with some pattern matching (excluding stdlib?)
-	in := &instrumenter{gopath: tempDir}
+	in := &instrumenter{
+		gopath:       tempDir,
+		instrumented: make(map[string]struct{})}
 	err = in.instrumentPackage(packageName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to instrument package(%s): %s\n", packageName, err)
+		fmt.Fprintf(os.Stderr, "failed to instrument package(%s): %s\n",
+			packageName, err)
 		return 1
 	}
 
@@ -208,4 +244,3 @@ func main() {
 	}
 	os.Exit(instrumentAndTest(packageName))
 }
-
