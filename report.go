@@ -80,8 +80,8 @@ func printPackage(w io.Writer, pkg *Package) {
 		if len(fn.Statements) > 0 {
 			stmtPercent = float64(reached) / float64(len(fn.Statements)) * 100
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d/%d (%.2f%%)\n",
-			pkg.Name, fn.Name, reached, len(fn.Statements), stmtPercent)
+		fmt.Fprintf(w, "%s\t%s\t%.2f%% (%d/%d)\n",
+			pkg.Name, fn.Name, stmtPercent, reached, len(fn.Statements))
 	}
 }
 
