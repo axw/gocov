@@ -1,0 +1,212 @@
+// Copyright (c) 2012 The Gocov Authors.
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
+
+package gocov
+
+import (
+	"fmt"
+	"go/scanner"
+	"go/token"
+	"io/ioutil"
+	"os"
+	"strings"
+	"strconv"
+)
+
+const gocovObjectPrefix = "gocovObject"
+
+func errorHandler(pos token.Position, msg string) {
+	fmt.Fprintf(os.Stderr, "scanning error: %s [%s]", msg, pos)
+}
+
+func objnameToUid(objname string) int {
+	if !strings.HasPrefix(objname, gocovObjectPrefix) {
+		panic(fmt.Errorf("expected gocov object name, found: %#q", objname))
+	}
+	val, err := strconv.Atoi(objname[len(gocovObjectPrefix):])
+	if err != nil {
+		panic(err)
+	}
+	return val
+}
+
+type parser struct {
+	*token.FileSet
+	*scanner.Scanner
+	tok      token.Token
+	pos      token.Pos
+	lit      string
+
+	context  *Context
+	objects  map[int]Object
+	packages []*Package
+}
+
+func (p *parser) next() token.Token {
+	p.pos, p.tok, p.lit = p.Scan()
+	return p.tok
+}
+
+func (p *parser) expect(tok token.Token) {
+	if p.tok != tok {
+		panic(fmt.Errorf("expected '%s', found '%s' (%s)",
+			tok, p.tok, p.Position(p.pos)))
+	}
+}
+
+func (p *parser) expectNext(tok token.Token) {
+	p.next()
+	p.expect(tok)
+}
+
+func (p *parser) parseRegisterPackage() {
+	p.expectNext(token.LPAREN)
+	p.expectNext(token.STRING)
+	name, _ := strconv.Unquote(p.lit)
+	p.expectNext(token.RPAREN)
+	p.expectNext(token.COLON)
+	p.expectNext(token.IDENT)
+	uid := objnameToUid(p.lit)
+	pkg := p.context.RegisterPackage(name)
+	if pkg.Uid() != uid {
+		panic(fmt.Errorf("uid differs: source must have changed"))
+	}
+	p.objects[uid] = pkg
+	p.packages = append(p.packages, pkg)
+}
+
+func (p *parser) parseRegisterFunction(pkg *Package) {
+	p.expectNext(token.LPAREN)
+	p.expectNext(token.STRING)
+	name, _ := strconv.Unquote(p.lit)
+	p.expectNext(token.COMMA)
+	p.expectNext(token.STRING)
+	file, _ := strconv.Unquote(p.lit)
+	p.expectNext(token.COMMA)
+	p.expectNext(token.INT)
+	line, _ := strconv.Atoi(p.lit)
+	p.expectNext(token.RPAREN)
+	p.expectNext(token.COLON)
+	p.expectNext(token.IDENT)
+	uid := objnameToUid(p.lit)
+	fn := pkg.RegisterFunction(name, file, line)
+	if fn.Uid() != uid {
+		panic(fmt.Errorf("uid differs: source must have changed"))
+	}
+	p.objects[uid] = fn
+}
+
+func (p *parser) parseRegisterStatement(fn *Function) {
+	p.expectNext(token.LPAREN)
+	p.expectNext(token.INT)
+	line, _ := strconv.Atoi(p.lit)
+	p.expectNext(token.RPAREN)
+	p.expectNext(token.COLON)
+	p.expectNext(token.IDENT)
+	uid := objnameToUid(p.lit)
+	stmt := fn.RegisterStatement(line)
+	if stmt.Uid() != uid {
+		panic(fmt.Errorf("uid differs: source must have changed"))
+	}
+	p.objects[uid] = stmt
+}
+
+func (p *parser) parseEnterLeave(fn *Function, entered bool) {
+	p.expectNext(token.LPAREN)
+	p.expectNext(token.RPAREN)
+	if entered {
+		fn.Enter()
+	} else {
+		fn.Leave()
+	}
+}
+
+func (p *parser) parseAt(stmt *Statement) {
+	p.expectNext(token.LPAREN)
+	p.expectNext(token.RPAREN)
+	stmt.At()
+}
+
+func (p *parser) parse() {
+	for tok := p.next(); tok != token.EOF; tok = p.next() {
+		p.expect(token.IDENT)
+		if p.lit == "RegisterPackage" {
+			p.parseRegisterPackage()
+		} else {
+			uid := objnameToUid(p.lit)
+			obj := p.objects[uid]
+			if obj == nil {
+				panic(fmt.Errorf("invalid object uid: %v", uid))
+			}
+			p.expectNext(token.PERIOD)
+			p.expectNext(token.IDENT)
+			switch p.lit {
+			case "RegisterFunction":
+				p.parseRegisterFunction(obj.(*Package))
+			case "RegisterStatement":
+				p.parseRegisterStatement(obj.(*Function))
+			case "Enter", "Leave":
+				p.parseEnterLeave(obj.(*Function), p.lit == "Enter")
+			case "At":
+				p.parseAt(obj.(*Statement))
+			}
+			//p.parseFunctionCall()
+		}
+		p.next()
+		p.expect(token.SEMICOLON)
+	}
+}
+
+func ParseFile(path string) (pkgs []*Package, err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			if e, ok := e.(error); ok {
+				err = e
+				return
+			}
+			err = fmt.Errorf("%s", e)
+		}
+	}()
+
+	finfo, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	src, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	fset := token.NewFileSet()
+	f := fset.AddFile(path, fset.Base(), int(finfo.Size()))
+	s := &scanner.Scanner{}
+	s.Init(f, src, errorHandler, 0)
+	p := &parser{
+		FileSet: fset,
+		Scanner: s,
+		tok:     token.Token(-1),
+		objects: make(map[int]Object),
+		context: &Context{},
+    }
+	p.parse()
+	pkgs = p.packages
+	return
+}

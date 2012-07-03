@@ -77,7 +77,7 @@ func (v *stmtVisitor) Visit(n ast.Node) ast.Visitor {
 			if _, caseClause := s.(*ast.CaseClause); !caseClause {
 				line := v.fset.Position(s.Pos()).Line
 				stmtObj := v.functions[len(v.functions)-1].RegisterStatement(line)
-				expr := makeCall(fmt.Sprint("gocovObj", stmtObj.Uid(), ".At"))
+				expr := makeCall(fmt.Sprint(stmtObj, ".At"))
 				stmt := &ast.ExprStmt{X: expr}
 				item := []ast.Stmt{stmt}
 				b.List = append(b.List[:i], append(item, b.List[i:]...)...)
@@ -123,19 +123,19 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 	var vardecls []ast.Decl
 	var pkgvarname string
 	if pkgCreated {
-		pkgvarname = fmt.Sprint("gocovObj", pkgObj.Uid())
+		pkgvarname = fmt.Sprint(pkgObj)
 		value := makeCall("gocov.RegisterPackage", makeLit(f.Name.Name))
 		vardecls = append(vardecls, makeVarDecl(pkgvarname, value))
 	} else {
-		pkgvarname = fmt.Sprint("gocovObj", pkgObj.Uid())
+		pkgvarname = fmt.Sprint(pkgObj)
 	}
 	for _, fn := range state.functions {
-		fnvarname := fmt.Sprint("gocovObj", fn.Uid())
+		fnvarname := fmt.Sprint(fn)
 		value := makeCall(pkgvarname+".RegisterFunction",
 			makeLit(fn.Name), makeLit(fn.File), makeLit(fn.Line))
 		vardecls = append(vardecls, makeVarDecl(fnvarname, value))
 		for _, stmt := range fn.Statements {
-			varname := fmt.Sprint("gocovObj", stmt.Uid())
+			varname := fmt.Sprint(stmt)
 			value := makeCall(
 				fnvarname+".RegisterStatement", makeLit(stmt.Line))
 			vardecls = append(vardecls, makeVarDecl(varname, value))

@@ -242,7 +242,12 @@ func instrumentAndTest(packageName string) (rc int) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to parse gocov output: %s\n", err)
 	} else {
-		fmt.Println("TODO", packages)
+		report := gocov.NewReport()
+		for _, pkg := range packages {
+			report.AddPackage(pkg)
+		}
+		fmt.Println()
+		gocov.PrintReport(os.Stdout, report)
 	}
 	return
 }

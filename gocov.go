@@ -36,18 +36,6 @@ type Object interface {
 
 type ObjectList []Object
 
-func (l ObjectList) Len() int {
-	return len(l)
-}
-
-func (l ObjectList) Less(i, j int) bool {
-	return l[i].Uid() < l[j].Uid()
-}
-
-func (l ObjectList) Swap(i, j int) {
-	l[i], l[j] = l[j], l[j]
-}
-
 type object struct {
 	uid     int
 	context *Context
@@ -58,7 +46,7 @@ func (o *object) Uid() int {
 }
 
 func (o *object) String() string {
-	return fmt.Sprint("$", o.uid)
+	return fmt.Sprint("gocovObject", o.uid)
 }
 
 type Package struct {
@@ -150,7 +138,7 @@ func init() {
 }
 
 func (c *Context) logf(format string, args ...interface{}) {
-	if c.Writer != nil {
+	if c.Tracer != nil {
 		fmt.Fprintf(c.Tracer, format, args...)
 	}
 }
@@ -171,7 +159,7 @@ func RegisterPackage(name string) *Package {
 func (c *Context) RegisterPackage(name string) *Package {
 	p := &Package{object: c.allocObject(), Name: name}
 	c.Objects = append(c.Objects, p)
-	c.logf("RegisterPackage(%s): %s", name, p)
+	c.logf("RegisterPackage(%#q): %s\n", name, p)
 	return p
 }
 
@@ -182,7 +170,7 @@ func (p *Package) RegisterFunction(name, file string, line int) *Function {
 	f := &Function{object: obj, Name: name, File: file, Line: line}
 	p.Functions = append(p.Functions, f)
 	c.Objects = append(c.Objects, f)
-	c.logf("%s.RegisterFunction(%s, %s, %d): %s\n", p, name, file, line, f)
+	c.logf("%s.RegisterFunction(%#q, %#q, %d): %s\n", p, name, file, line, f)
 	return f
 }
 
