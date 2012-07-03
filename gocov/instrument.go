@@ -31,6 +31,7 @@ import (
 type state struct {
 	fset      *token.FileSet
 	file      *ast.File
+	pkg       *gocov.Package
 	functions []*gocov.Function
 }
 
@@ -76,8 +77,8 @@ func (v *stmtVisitor) Visit(n ast.Node) ast.Visitor {
 			if _, caseClause := s.(*ast.CaseClause); !caseClause {
 				line := v.fset.Position(s.Pos()).Line
 				stmtObj := v.functions[len(v.functions)-1].RegisterStatement(line)
-				expr := makeCall(fmt.Sprint("gocovObj", stmtObj.Uid, ".At"))
-				stmt := &ast.ExprStmt{expr}
+				expr := makeCall(fmt.Sprint("gocovObj", stmtObj.Uid(), ".At"))
+				stmt := &ast.ExprStmt{X: expr}
 				item := []ast.Stmt{stmt}
 				b.List = append(b.List[:i], append(item, b.List[i:]...)...)
 				i++
@@ -99,7 +100,7 @@ func (v *funcVisitor) Visit(n ast.Node) ast.Visitor {
 		// TODO format receiver name into registered function name.
 		f_ := v.fset.File(n.Pos())
 		file, line := f_.Name(), f_.Line(n.Pos())
-		f := gocov.RegisterFunction(n.Name.Name, file, line)
+		f := v.pkg.RegisterFunction(n.Name.Name, file, line)
 		v.state.functions = append(v.state.functions, f)
 		return &stmtVisitor{v.state, nil}
 	}
@@ -107,20 +108,36 @@ func (v *funcVisitor) Visit(n ast.Node) ast.Visitor {
 }
 
 func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
-	state := &state{fset, f, nil}
+	pkgObj := in.instrumented[f.Name.Name]
+	pkgCreated := false
+	if pkgObj == nil {
+		pkgCreated = true
+		pkgObj = gocov.RegisterPackage(f.Name.Name)
+		in.instrumented[f.Name.Name] = pkgObj
+	}
+	state := &state{fset, f, pkgObj, nil}
 	ast.SortImports(fset, f)
 	ast.Walk(&funcVisitor{state}, f)
 
 	// Insert variable declarations for registered objects.
 	var vardecls []ast.Decl
+	var pkgvarname string
+	if pkgCreated {
+		pkgvarname = fmt.Sprint("gocovObj", pkgObj.Uid())
+		value := makeCall("gocov.RegisterPackage", makeLit(f.Name.Name))
+		vardecls = append(vardecls, makeVarDecl(pkgvarname, value))
+	} else {
+		pkgvarname = fmt.Sprint("gocovObj", pkgObj.Uid())
+	}
 	for _, fn := range state.functions {
-		fnvarname := fmt.Sprint("gocovObj", fn.Uid)
-		value := makeCall("gocov.RegisterFunction",
+		fnvarname := fmt.Sprint("gocovObj", fn.Uid())
+		value := makeCall(pkgvarname+".RegisterFunction",
 			makeLit(fn.Name), makeLit(fn.File), makeLit(fn.Line))
 		vardecls = append(vardecls, makeVarDecl(fnvarname, value))
 		for _, stmt := range fn.Statements {
-			varname := fmt.Sprint("gocovObj", stmt.Uid)
-			value := makeCall(fnvarname+".RegisterStatement", makeLit(stmt.Line))
+			varname := fmt.Sprint("gocovObj", stmt.Uid())
+			value := makeCall(
+				fnvarname+".RegisterStatement", makeLit(stmt.Line))
 			vardecls = append(vardecls, makeVarDecl(varname, value))
 		}
 	}
@@ -131,8 +148,7 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 	}
 
 	// Add a "gocov" import.
-	// TODO check something was actually instrumented by the walker.
-	if len(state.functions) > 0 {
+	if pkgCreated && len(pkgObj.Functions) > 0 {
 		found := false
 		for _, importSpec := range f.Imports {
 			if importSpec.Path.Value == strconv.Quote(gocovPackagePath) {
@@ -141,8 +157,10 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 			}
 		}
 		if !found {
-			gocovImportSpec := &ast.ImportSpec{Path: makeLit(gocovPackagePath).(*ast.BasicLit)}
-			gocovImportGenDecl := &ast.GenDecl{Tok: token.IMPORT, Specs: []ast.Spec{gocovImportSpec}}
+			gocovImportSpec := &ast.ImportSpec{
+				Path: makeLit(gocovPackagePath).(*ast.BasicLit)}
+			gocovImportGenDecl := &ast.GenDecl{
+				Tok: token.IMPORT, Specs: []ast.Spec{gocovImportSpec}}
 			f.Decls = append([]ast.Decl{gocovImportGenDecl}, f.Decls...)
 		}
 	}

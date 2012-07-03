@@ -23,6 +23,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/axw/gocov"
 	"go/ast"
 	"go/build"
 	"go/parser"
@@ -40,14 +41,17 @@ import (
 const gocovPackagePath = "github.com/axw/gocov"
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: gocov [package]\n")
+	fmt.Fprintf(os.Stderr, "Usage:\n\n\tgocov command [package]\n\n")
+	fmt.Fprintf(os.Stderr, "The commands are:\n\n")
+	fmt.Fprintf(os.Stderr, "\ttest\n")
+	fmt.Fprintf(os.Stderr, "\n")
 	flag.PrintDefaults()
 	os.Exit(2)
 }
 
 type instrumenter struct {
 	gopath       string // temporary gopath
-	instrumented map[string]struct{}
+	instrumented map[string]*gocov.Package
 }
 
 func putenv(env []string, key, value string) []string {
@@ -125,7 +129,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	if err != nil {
 		return err
 	}
-	in.instrumented[pkgpath] = struct{}{}
+	in.instrumented[pkgpath] = nil // created in first instrumented file
 	if buildpkg.Goroot {
 		// ignore packages in GOROOT
 		return nil
@@ -203,7 +207,7 @@ func instrumentAndTest(packageName string) (rc int) {
 
 	in := &instrumenter{
 		gopath:       tempDir,
-		instrumented: make(map[string]struct{})}
+		instrumented: make(map[string]*gocov.Package)}
 	err = in.instrumentPackage(packageName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to instrument package(%s): %s\n",
@@ -213,8 +217,9 @@ func instrumentAndTest(packageName string) (rc int) {
 
 	// Run "go test".
 	// TODO pass through test flags.
+	outfilePath := filepath.Join(tempDir, "gocov.out")
 	env := os.Environ()
-	env = putenv(env, "GOCOVOUT", "-")
+	env = putenv(env, "GOCOVOUT", outfilePath)
 	if gopath := os.Getenv("GOPATH"); gopath != "" {
 		gopath = fmt.Sprintf("%s%c%s", tempDir, os.PathListSeparator, gopath)
 		env = putenv(env, "GOPATH", gopath)
@@ -227,20 +232,38 @@ func instrumentAndTest(packageName string) (rc int) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "go test failed: %s\n", err)
-		return 1
+		rc = 1
 	}
 
-	return 0
+	packages, err := gocov.ParseFile(outfilePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse gocov output: %s\n", err)
+	} else {
+		fmt.Println("TODO", packages)
+	}
+	return
 }
 
 func main() {
 	flag.Usage = usage
 	flag.Parse()
+	command := ""
 	packageName := "."
 	if flag.NArg() > 0 {
-		packageName = flag.Arg(0)
+		command = flag.Arg(0)
+		if command != "test" { //&& command != "run" {
+			fmt.Fprintf(os.Stderr, "Unknown command: %#q\n\n", command)
+			usage()
+		}
+		if flag.NArg() > 1 {
+			packageName = flag.Arg(1)
+		}
+	} else {
+		usage()
 	}
+	// TODO create and pass a "Command" interface.
 	os.Exit(instrumentAndTest(packageName))
 }

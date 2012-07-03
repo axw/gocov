@@ -23,25 +23,64 @@ package gocov
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"sync/atomic"
 )
 
-var writer io.Writer
-var objectCount int
-
-type Object struct {
-	Uid int
+// Object is an interface implemented by all coverage objects.
+type Object interface {
+	Uid() int
 }
 
-func (o *Object) String() string {
-	return fmt.Sprint("$", o.Uid)
+type ObjectList []Object
+
+func (l ObjectList) Len() int {
+	return len(l)
+}
+
+func (l ObjectList) Less(i, j int) bool {
+	return l[i].Uid() < l[j].Uid()
+}
+
+func (l ObjectList) Swap(i, j int) {
+	l[i], l[j] = l[j], l[j]
+}
+
+type object struct {
+	uid     int
+	context *Context
+}
+
+func (o *object) Uid() int {
+	return o.uid
+}
+
+func (o *object) String() string {
+	return fmt.Sprint("$", o.uid)
+}
+
+type Package struct {
+	object
+
+	// Name is the canonical path of the package.
+	Name string
+
+	// Functions is a list of functions registered with this package.
+	Functions []*Function
 }
 
 type Function struct {
-	Object
+	object
+
+	// Name is the name of the function. If the function has a receiver, the
+	// name will be of the form T.N, where T is the type and N is the name.
 	Name string
+
+	// File is the full path to the file in which the function is defined.
 	File string
+
+	// Line is the line number the function's signature starts on.
 	Line int
 
 	// statements registered with this function.
@@ -55,70 +94,124 @@ type Function struct {
 }
 
 type Statement struct {
-	Object
+	object
+
+	// Line is the line number the statement starts on.
 	Line int
 
-	// number of times the statement was reached.
+	// Reached is the number of times the statement was reached.
 	Reached int64
 }
 
+// Flags that affect how results are traced, if a 
+type TraceFlag int
+
+const (
+	// Trace all visits to an object (warning: may increase run time
+	// significantly). If this flag is not set, only the first visit
+	// to each object will be traced.
+	TraceAll TraceFlag = 0x00000001
+)
+
+// Coverage context.
+type Context struct {
+	// ObjectList is a sorted list of coverage objects
+	// (packages, functions, etc.)
+	Objects ObjectList
+
+	// Tracer is used for tracing coverage. If nil, no tracing will occur.
+	Tracer io.Writer
+
+	// TraceFlags alters how coverage is traced.
+	TraceFlags TraceFlag
+}
+
+func (c *Context) traceAll() bool {
+	return c.TraceFlags&TraceAll == TraceAll
+}
+
+// Default coverage context.
+var Default = &Context{}
+
 func init() {
-	switch out := os.Getenv("GOCOVOUT"); out {
+	switch v := os.Getenv("GOCOVOUT"); v {
 	case "":
-		// no output
 	case "-":
-		writer = os.Stdout
+		Default.Tracer = os.Stdout
 	default:
-		file, err := os.Create(out)
+		var err error
+		writer, err := os.Create(v)
 		if err != nil {
-			writer = file
-		} else {
-			if file != nil {
-				file.Close()
-			}
+			log.Fatalf("gocov: failed to create log file: %s\n", err)
 		}
+		Default.Tracer = writer
 	}
 }
 
-func allocUid() int {
-	uid := objectCount
-	objectCount++
-	return uid
-}
-
-func logf(format string, args ...interface{}) {
-	if writer != nil {
-		fmt.Fprintf(writer, format, args...)
+func (c *Context) logf(format string, args ...interface{}) {
+	if c.Writer != nil {
+		fmt.Fprintf(c.Tracer, format, args...)
 	}
 }
 
-// RegisterFunction registers a function for coverage, returning a
-// new *Function.
-func RegisterFunction(name, file string, line int) *Function {
-	f := &Function{Object: Object{allocUid()}, Name: name, File: file, Line: line}
-	//logf("RegisterFunction(%#v, %#v, %d): %s\n", name, file, line, f)
+func (c *Context) allocObject() object {
+	if n := len(c.Objects); n > 0 {
+		return object{c.Objects[n-1].Uid() + 1, c}
+	}
+	return object{0, c}
+}
+
+// RegisterPackage registers a package for coverage using the default context.
+func RegisterPackage(name string) *Package {
+	return Default.RegisterPackage(name)
+}
+
+// RegisterPackage registers a package for coverage.
+func (c *Context) RegisterPackage(name string) *Package {
+	p := &Package{object: c.allocObject(), Name: name}
+	c.Objects = append(c.Objects, p)
+	c.logf("RegisterPackage(%s): %s", name, p)
+	return p
+}
+
+// RegisterFunction registers a function for coverage.
+func (p *Package) RegisterFunction(name, file string, line int) *Function {
+	c := p.context
+	obj := c.allocObject()
+	f := &Function{object: obj, Name: name, File: file, Line: line}
+	p.Functions = append(p.Functions, f)
+	c.Objects = append(c.Objects, f)
+	c.logf("%s.RegisterFunction(%s, %s, %d): %s\n", p, name, file, line, f)
 	return f
 }
 
+// Leave informs gocov that the function has been entered.
 func (f *Function) Enter() {
-	//logf("%s.Enter()\n", f)
-	atomic.AddInt64(&f.Entered, 1)
+	if atomic.AddInt64(&f.Entered, 1) == 1 || f.context.traceAll() {
+		f.context.logf("%s.Enter()\n", f)
+	}
 }
 
+// Leave informs gocov that the function has been left.
 func (f *Function) Leave() {
-	//logf("%s.Leave()\n", f)
-	atomic.AddInt64(&f.Left, 1)
+	if atomic.AddInt64(&f.Left, 1) == 1 || f.context.traceAll() {
+		f.context.logf("%s.Leave()\n", f)
+	}
 }
 
+// RegisterStatement registers a statement for coverage.
 func (f *Function) RegisterStatement(line int) *Statement {
-	s := &Statement{Object: Object{allocUid()}, Line: line}
+	c := f.context
+	s := &Statement{object: c.allocObject(), Line: line}
 	f.Statements = append(f.Statements, s)
-	//logf("%s.RegisterStatement(%d): %s\n", f, line, s)
+	c.Objects = append(c.Objects, s)
+	c.logf("%s.RegisterStatement(%d): %s\n", f, line, s)
 	return s
 }
 
-// At is called each time the statement is reached.
+// At informs gocov that the statement has been reached.
 func (s *Statement) At() {
-	//logf("%s.At()\n", s)
-	atomic.AddInt64(&s.Reached, 1)
+	if atomic.AddInt64(&s.Reached, 1) == 1 || s.context.traceAll() {
+		s.context.logf("%s.At()\n", s)
+	}
 }
