@@ -21,6 +21,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/axw/gocov"
@@ -41,9 +42,10 @@ import (
 const gocovPackagePath = "github.com/axw/gocov"
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage:\n\n\tgocov command [package]\n\n")
+	fmt.Fprintf(os.Stderr, "Usage:\n\n\tgocov command [arguments]\n\n")
 	fmt.Fprintf(os.Stderr, "The commands are:\n\n")
 	fmt.Fprintf(os.Stderr, "\ttest\n")
+	fmt.Fprintf(os.Stderr, "\treport\n")
 	fmt.Fprintf(os.Stderr, "\n")
 	flag.PrintDefaults()
 	os.Exit(2)
@@ -184,7 +186,25 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	return nil
 }
 
-func instrumentAndTest(packageName string) (rc int) {
+func marshalJson(packages []*gocov.Package) ([]byte, error) {
+	return json.Marshal(struct{ Packages []*gocov.Package }{packages})
+}
+
+func unmarshalJson(data []byte) (packages []*gocov.Package, err error) {
+	result := &struct{ Packages []*gocov.Package }{}
+	err = json.Unmarshal(data, result)
+	if err == nil {
+		packages = result.Packages
+	}
+	return
+}
+
+func instrumentAndTest() (rc int) {
+	packageName := "."
+	if flag.NArg() > 1 {
+		packageName = flag.Arg(1)
+	}
+
 	tempDir, err := ioutil.TempDir("", "gocov")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create temporary GOPATH: %s", err)
@@ -228,8 +248,7 @@ func instrumentAndTest(packageName string) (rc int) {
 	}
 	cmd := exec.Command("go", "test", "-v", packageName)
 	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 
@@ -238,37 +257,75 @@ func instrumentAndTest(packageName string) (rc int) {
 		rc = 1
 	}
 
-	packages, err := gocov.ParseFile(outfilePath)
+	packages, err := gocov.ParseTrace(outfilePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to parse gocov output: %s\n", err)
 	} else {
-		report := gocov.NewReport()
-		for _, pkg := range packages {
-			report.AddPackage(pkg)
+		data, err := marshalJson(packages)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to format as JSON: %s\n", err)
+		} else {
+			fmt.Println(string(data))
 		}
-		fmt.Println()
-		gocov.PrintReport(os.Stdout, report)
 	}
 	return
+}
+
+func reportCoverage() (rc int) {
+	files := make([]*os.File, 0, 1)
+	if flag.NArg() > 1 {
+		name := flag.Arg(1)
+		file, err := os.Open(name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to open file (%s): %s\n", name, err)
+		}
+		files = append(files, file)
+	} else {
+		files = append(files, os.Stdin)
+	}
+	report := newReport()
+	for _, file := range files {
+		data, err := ioutil.ReadAll(file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to read coverage file: %s\n", err)
+			return 1
+		}
+		packages, err := unmarshalJson(data)
+		if err != nil {
+			fmt.Fprintf(
+				os.Stderr, "failed to unmarshal coverage data: %s\n", err)
+			return 1
+		}
+		for _, pkg := range packages {
+			report.addPackage(pkg)
+		}
+		if file != os.Stdin {
+			file.Close()
+		}
+	}
+	fmt.Println()
+	printReport(os.Stdout, report)
+	return 0
 }
 
 func main() {
 	flag.Usage = usage
 	flag.Parse()
 	command := ""
-	packageName := "."
 	if flag.NArg() > 0 {
 		command = flag.Arg(0)
-		if command != "test" { //&& command != "run" {
+		switch command {
+		//case "annotate":
+		case "report":
+			os.Exit(reportCoverage())
+		case "test":
+			os.Exit(instrumentAndTest())
+		//case "run"
+		default:
 			fmt.Fprintf(os.Stderr, "Unknown command: %#q\n\n", command)
 			usage()
-		}
-		if flag.NArg() > 1 {
-			packageName = flag.Arg(1)
 		}
 	} else {
 		usage()
 	}
-	// TODO create and pass a "Command" interface.
-	os.Exit(instrumentAndTest(packageName))
 }

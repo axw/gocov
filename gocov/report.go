@@ -18,22 +18,23 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 
-package gocov
+package main
 
 import (
 	"fmt"
+	"github.com/axw/gocov"
 	"io"
 	"path/filepath"
 	"sort"
 	"text/tabwriter"
 )
 
-type Report struct {
-	packages []*Package
+type report struct {
+	packages []*gocov.Package
 }
 
 type reportFunction struct {
-	*Function
+	*gocov.Function
 	statementsReached int
 }
 
@@ -71,13 +72,13 @@ func (r reverse) Less(i, j int) bool {
 }
 
 // NewReport creates a new report.
-func NewReport() (r *Report) {
-	r = &Report{}
+func newReport() (r *report) {
+	r = &report{}
 	return
 }
 
 // AddPackage adds a package's coverage information to the report.
-func (r *Report) AddPackage(p *Package) {
+func (r *report) addPackage(p *gocov.Package) {
 	i := sort.Search(len(r.packages), func(i int) bool {
 		return r.packages[i].Name >= r.packages[i].Name
 	})
@@ -85,18 +86,18 @@ func (r *Report) AddPackage(p *Package) {
 		panic("package already exists: result merging not implemented yet")
 	} else {
 		head := r.packages[:i]
-		tail := append([]*Package{p}, r.packages[i:]...)
+		tail := append([]*gocov.Package{p}, r.packages[i:]...)
 		r.packages = append(head, tail...)
 	}
 }
 
 // Clear clears the coverage information from the report.
-func (r *Report) Clear() {
+func (r *report) clear() {
 	r.packages = nil
 }
 
 // PrintReport prints a coverage report to the given writer.
-func PrintReport(w io.Writer, r *Report) {
+func printReport(w io.Writer, r *report) {
 	w = tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	//fmt.Fprintln(w, "Package\tFunction\tStatements\t")
 	//fmt.Fprintln(w, "-------\t--------\t---------\t")
@@ -106,7 +107,7 @@ func PrintReport(w io.Writer, r *Report) {
 	}
 }
 
-func printPackage(w io.Writer, pkg *Package) {
+func printPackage(w io.Writer, pkg *gocov.Package) {
 	functions := make(reportFunctionList, len(pkg.Functions))
 	for i, fn := range pkg.Functions {
 		reached := 0
@@ -130,4 +131,3 @@ func printPackage(w io.Writer, pkg *Package) {
 			reached, len(fn.Statements))
 	}
 }
-

@@ -26,8 +26,8 @@ import (
 	"go/token"
 	"io/ioutil"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
 )
 
 const gocovObjectPrefix = "gocovObject"
@@ -50,9 +50,9 @@ func objnameToUid(objname string) int {
 type parser struct {
 	*token.FileSet
 	*scanner.Scanner
-	tok      token.Token
-	pos      token.Pos
-	lit      string
+	tok token.Token
+	pos token.Pos
+	lit string
 
 	context  *Context
 	objects  map[int]Object
@@ -174,7 +174,7 @@ func (p *parser) parse() {
 	}
 }
 
-func ParseFile(path string) (pkgs []*Package, err error) {
+func ParseTrace(path string) (pkgs []*Package, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if e, ok := e.(error); ok {
@@ -205,7 +205,7 @@ func ParseFile(path string) (pkgs []*Package, err error) {
 		tok:     token.Token(-1),
 		objects: make(map[int]Object),
 		context: &Context{},
-    }
+	}
 	p.parse()
 	pkgs = p.packages
 	return
