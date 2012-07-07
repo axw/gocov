@@ -159,8 +159,8 @@ func (v *funcVisitor) Visit(n ast.Node) ast.Visitor {
 		sv.VisitStmt(n.Body)
 		// TODO function coverage (insert "function.Enter", "function.Leave").
 
-	// TODO come up with naming scheme for function literals.
-	// case *ast.FuncLit:
+		// TODO come up with naming scheme for function literals.
+		// case *ast.FuncLit:
 	}
 	return v
 }

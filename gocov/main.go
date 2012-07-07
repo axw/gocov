@@ -59,7 +59,7 @@ type instrumenter struct {
 
 func putenv(env []string, key, value string) []string {
 	for i, s := range env {
-		if strings.HasPrefix(s, "GOPATH=") {
+		if strings.HasPrefix(s, key+"=") {
 			env[i] = key + "=" + value
 			return env
 		}
