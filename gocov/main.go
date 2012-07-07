@@ -44,6 +44,7 @@ const gocovPackagePath = "github.com/axw/gocov"
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n\n\tgocov command [arguments]\n\n")
 	fmt.Fprintf(os.Stderr, "The commands are:\n\n")
+	fmt.Fprintf(os.Stderr, "\tannotate\n")
 	fmt.Fprintf(os.Stderr, "\ttest\n")
 	fmt.Fprintf(os.Stderr, "\treport\n")
 	fmt.Fprintf(os.Stderr, "\n")
@@ -159,7 +160,6 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 			if err != nil {
 				return err
 			}
-			//printer.Fprint(os.Stdout, fset, f) // TODO check err?
 			printer.Fprint(file, fset, f) // TODO check err?
 			err = file.Close()
 			if err != nil {
@@ -173,8 +173,6 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 
 	// TODO include/exclude package names with a pattern.
 	for _, subpkgpath := range buildpkg.Imports {
-		// Make sure the package hasn't been instrumented yet (may be
-		// a transitive dependency).
 		if _, done := in.instrumented[subpkgpath]; !done {
 			err = in.instrumentPackage(subpkgpath)
 			if err != nil {
@@ -271,43 +269,6 @@ func instrumentAndTest() (rc int) {
 	return
 }
 
-func reportCoverage() (rc int) {
-	files := make([]*os.File, 0, 1)
-	if flag.NArg() > 1 {
-		name := flag.Arg(1)
-		file, err := os.Open(name)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to open file (%s): %s\n", name, err)
-		}
-		files = append(files, file)
-	} else {
-		files = append(files, os.Stdin)
-	}
-	report := newReport()
-	for _, file := range files {
-		data, err := ioutil.ReadAll(file)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to read coverage file: %s\n", err)
-			return 1
-		}
-		packages, err := unmarshalJson(data)
-		if err != nil {
-			fmt.Fprintf(
-				os.Stderr, "failed to unmarshal coverage data: %s\n", err)
-			return 1
-		}
-		for _, pkg := range packages {
-			report.addPackage(pkg)
-		}
-		if file != os.Stdin {
-			file.Close()
-		}
-	}
-	fmt.Println()
-	printReport(os.Stdout, report)
-	return 0
-}
-
 func main() {
 	flag.Usage = usage
 	flag.Parse()
@@ -315,7 +276,8 @@ func main() {
 	if flag.NArg() > 0 {
 		command = flag.Arg(0)
 		switch command {
-		//case "annotate":
+		case "annotate":
+			os.Exit(annotateSource())
 		case "report":
 			os.Exit(reportCoverage())
 		case "test":

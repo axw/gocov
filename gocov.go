@@ -69,8 +69,11 @@ type Function struct {
 	// File is the full path to the file in which the function is defined.
 	File string
 
-	// Line is the line number the function's signature starts on.
-	Line int
+	// Start is the start offset of the function's signature.
+	Start int
+
+	// End is the end offset of the function.
+	End int
 
 	// statements registered with this function.
 	Statements []*Statement
@@ -85,8 +88,11 @@ type Function struct {
 type Statement struct {
 	object
 
-	// Line is the line number the statement starts on.
-	Line int
+	// Start is the start offset of the statement.
+	Start int
+
+	// End is the end offset of the statement.
+	End int
 
 	// Reached is the number of times the statement was reached.
 	Reached int64
@@ -164,13 +170,20 @@ func (c *Context) RegisterPackage(name string) *Package {
 }
 
 // RegisterFunction registers a function for coverage.
-func (p *Package) RegisterFunction(name, file string, line int) *Function {
+func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int) *Function {
 	c := p.context
 	obj := c.allocObject()
-	f := &Function{object: obj, Name: name, File: file, Line: line}
+	f := &Function{
+		object: obj,
+		Name:   name,
+		File:   file,
+		Start:  startOffset,
+		End:    endOffset,
+	}
 	p.Functions = append(p.Functions, f)
 	c.Objects = append(c.Objects, f)
-	c.logf("%s.RegisterFunction(%#q, %#q, %d): %s\n", p, name, file, line, f)
+	c.logf("%s.RegisterFunction(%#q, %#q, %d, %d): %s\n",
+		p, name, file, startOffset, endOffset, f)
 	return f
 }
 
@@ -189,12 +202,12 @@ func (f *Function) Leave() {
 }
 
 // RegisterStatement registers a statement for coverage.
-func (f *Function) RegisterStatement(line int) *Statement {
+func (f *Function) RegisterStatement(startOffset, endOffset int) *Statement {
 	c := f.context
-	s := &Statement{object: c.allocObject(), Line: line}
+	s := &Statement{object: c.allocObject(), Start: startOffset, End: endOffset}
 	f.Statements = append(f.Statements, s)
 	c.Objects = append(c.Objects, s)
-	c.logf("%s.RegisterStatement(%d): %s\n", f, line, s)
+	c.logf("%s.RegisterStatement(%d, %d): %s\n", f, startOffset, endOffset, s)
 	return s
 }
 

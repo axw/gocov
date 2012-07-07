@@ -75,8 +75,8 @@ func (v *stmtVisitor) Visit(n ast.Node) ast.Visitor {
 		for i := 0; i < len(b.List); i++ {
 			s := b.List[i]
 			if _, caseClause := s.(*ast.CaseClause); !caseClause {
-				line := v.fset.Position(s.Pos()).Line
-				stmtObj := v.functions[len(v.functions)-1].RegisterStatement(line)
+				start, end := v.fset.Position(s.Pos()), v.fset.Position(s.End())
+				stmtObj := v.functions[len(v.functions)-1].RegisterStatement(start.Offset, end.Offset)
 				expr := makeCall(fmt.Sprint(stmtObj, ".At"))
 				stmt := &ast.ExprStmt{X: expr}
 				item := []ast.Stmt{stmt}
@@ -98,9 +98,8 @@ func (v *funcVisitor) Visit(n ast.Node) ast.Visitor {
 	case *ast.FuncDecl:
 		// TODO function coverage (insert "function.Enter", "function.Leave").
 		// TODO format receiver name into registered function name.
-		f_ := v.fset.File(n.Pos())
-		file, line := f_.Name(), f_.Line(n.Pos())
-		f := v.pkg.RegisterFunction(n.Name.Name, file, line)
+		start, end := v.fset.Position(n.Pos()), v.fset.Position(n.End())
+		f := v.pkg.RegisterFunction(n.Name.Name, start.Filename, start.Offset, end.Offset)
 		v.state.functions = append(v.state.functions, f)
 		return &stmtVisitor{v.state, nil}
 	}
@@ -132,12 +131,14 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 	for _, fn := range state.functions {
 		fnvarname := fmt.Sprint(fn)
 		value := makeCall(pkgvarname+".RegisterFunction",
-			makeLit(fn.Name), makeLit(fn.File), makeLit(fn.Line))
+			makeLit(fn.Name), makeLit(fn.File),
+			makeLit(fn.Start), makeLit(fn.End))
 		vardecls = append(vardecls, makeVarDecl(fnvarname, value))
 		for _, stmt := range fn.Statements {
 			varname := fmt.Sprint(stmt)
 			value := makeCall(
-				fnvarname+".RegisterStatement", makeLit(stmt.Line))
+				fnvarname+".RegisterStatement",
+				makeLit(stmt.Start), makeLit(stmt.End))
 			vardecls = append(vardecls, makeVarDecl(varname, value))
 		}
 	}

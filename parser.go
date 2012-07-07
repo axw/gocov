@@ -101,12 +101,15 @@ func (p *parser) parseRegisterFunction(pkg *Package) {
 	file, _ := strconv.Unquote(p.lit)
 	p.expectNext(token.COMMA)
 	p.expectNext(token.INT)
-	line, _ := strconv.Atoi(p.lit)
+	startOffset, _ := strconv.Atoi(p.lit)
+	p.expectNext(token.COMMA)
+	p.expectNext(token.INT)
+	endOffset, _ := strconv.Atoi(p.lit)
 	p.expectNext(token.RPAREN)
 	p.expectNext(token.COLON)
 	p.expectNext(token.IDENT)
 	uid := objnameToUid(p.lit)
-	fn := pkg.RegisterFunction(name, file, line)
+	fn := pkg.RegisterFunction(name, file, startOffset, endOffset)
 	if fn.Uid() != uid {
 		panic(fmt.Errorf("uid differs: source must have changed"))
 	}
@@ -116,12 +119,15 @@ func (p *parser) parseRegisterFunction(pkg *Package) {
 func (p *parser) parseRegisterStatement(fn *Function) {
 	p.expectNext(token.LPAREN)
 	p.expectNext(token.INT)
-	line, _ := strconv.Atoi(p.lit)
+	startOffset, _ := strconv.Atoi(p.lit)
+	p.expectNext(token.COMMA)
+	p.expectNext(token.INT)
+	endOffset, _ := strconv.Atoi(p.lit)
 	p.expectNext(token.RPAREN)
 	p.expectNext(token.COLON)
 	p.expectNext(token.IDENT)
 	uid := objnameToUid(p.lit)
-	stmt := fn.RegisterStatement(line)
+	stmt := fn.RegisterStatement(startOffset, endOffset)
 	if stmt.Uid() != uid {
 		panic(fmt.Errorf("uid differs: source must have changed"))
 	}

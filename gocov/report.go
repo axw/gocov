@@ -21,9 +21,12 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/axw/gocov"
 	"io"
+	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sort"
 	"text/tabwriter"
@@ -126,8 +129,45 @@ func printPackage(w io.Writer, pkg *gocov.Package) {
 		if len(fn.Statements) > 0 {
 			stmtPercent = float64(reached) / float64(len(fn.Statements)) * 100
 		}
-		fmt.Fprintf(w, "%s/%s:%d\t %s\t %.2f%% (%d/%d)\n",
-			pkg.Name, filepath.Base(fn.File), fn.Line, fn.Name, stmtPercent,
+		fmt.Fprintf(w, "%s/%s\t %s\t %.2f%% (%d/%d)\n",
+			pkg.Name, filepath.Base(fn.File), fn.Name, stmtPercent,
 			reached, len(fn.Statements))
 	}
+}
+
+func reportCoverage() (rc int) {
+	files := make([]*os.File, 0, 1)
+	if flag.NArg() > 1 {
+		name := flag.Arg(1)
+		file, err := os.Open(name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to open file (%s): %s\n", name, err)
+		}
+		files = append(files, file)
+	} else {
+		files = append(files, os.Stdin)
+	}
+	report := newReport()
+	for _, file := range files {
+		data, err := ioutil.ReadAll(file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to read coverage file: %s\n", err)
+			return 1
+		}
+		packages, err := unmarshalJson(data)
+		if err != nil {
+			fmt.Fprintf(
+				os.Stderr, "failed to unmarshal coverage data: %s\n", err)
+			return 1
+		}
+		for _, pkg := range packages {
+			report.addPackage(pkg)
+		}
+		if file != os.Stdin {
+			file.Close()
+		}
+	}
+	fmt.Println()
+	printReport(os.Stdout, report)
+	return 0
 }
