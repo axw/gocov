@@ -67,26 +67,70 @@ func makeVarDecl(name string, value ast.Expr) *ast.GenDecl {
 
 type stmtVisitor struct {
 	*state
-	block *ast.BlockStmt
 }
 
-func (v *stmtVisitor) Visit(n ast.Node) ast.Visitor {
-	if b, ok := n.(*ast.BlockStmt); ok {
-		for i := 0; i < len(b.List); i++ {
-			s := b.List[i]
-			if _, caseClause := s.(*ast.CaseClause); !caseClause {
-				start, end := v.fset.Position(s.Pos()), v.fset.Position(s.End())
-				stmtObj := v.functions[len(v.functions)-1].RegisterStatement(start.Offset, end.Offset)
-				expr := makeCall(fmt.Sprint(stmtObj, ".At"))
-				stmt := &ast.ExprStmt{X: expr}
-				item := []ast.Stmt{stmt}
-				b.List = append(b.List[:i], append(item, b.List[i:]...)...)
-				i++
-			}
+func (v *stmtVisitor) VisitStmt(s ast.Stmt) {
+	var statements *[]ast.Stmt
+	switch s := s.(type) {
+	case *ast.BlockStmt:
+		statements = &s.List
+	case *ast.CaseClause:
+		statements = &s.Body
+	case *ast.CommClause:
+		statements = &s.Body
+	case *ast.ForStmt:
+		if s.Init != nil {
+			v.VisitStmt(s.Init)
 		}
-		v = &stmtVisitor{v.state, b}
+		if s.Post != nil {
+			v.VisitStmt(s.Post)
+		}
+		v.VisitStmt(s.Body)
+	case *ast.IfStmt:
+		if s.Init != nil {
+			v.VisitStmt(s.Init)
+		}
+		v.VisitStmt(s.Body)
+		if s.Else != nil {
+			v.VisitStmt(s.Else)
+		}
+	case *ast.LabeledStmt:
+		v.VisitStmt(s.Stmt)
+	case *ast.RangeStmt:
+		v.VisitStmt(s.Body)
+	case *ast.SelectStmt:
+		v.VisitStmt(s.Body)
+	case *ast.SwitchStmt:
+		if s.Init != nil {
+			v.VisitStmt(s.Init)
+		}
+		v.VisitStmt(s.Body)
+	case *ast.TypeSwitchStmt:
+		if s.Init != nil {
+			v.VisitStmt(s.Init)
+		}
+		v.VisitStmt(s.Assign)
+		v.VisitStmt(s.Body)
 	}
-	return v
+	if statements == nil {
+		return
+	}
+	for i := 0; i < len(*statements); i++ {
+		s := (*statements)[i]
+		switch s.(type) {
+		case *ast.CaseClause, *ast.CommClause, *ast.BlockStmt:
+			break
+		default:
+			start, end := v.fset.Position(s.Pos()), v.fset.Position(s.End())
+			stmtObj := v.functions[len(v.functions)-1].RegisterStatement(start.Offset, end.Offset)
+			expr := makeCall(fmt.Sprint(stmtObj, ".At"))
+			stmt := &ast.ExprStmt{X: expr}
+			item := []ast.Stmt{stmt}
+			*statements = append((*statements)[:i], append(item, (*statements)[i:]...)...)
+			i++
+		}
+		v.VisitStmt(s)
+	}
 }
 
 type funcVisitor struct {
@@ -96,12 +140,27 @@ type funcVisitor struct {
 func (v *funcVisitor) Visit(n ast.Node) ast.Visitor {
 	switch n := n.(type) {
 	case *ast.FuncDecl:
-		// TODO function coverage (insert "function.Enter", "function.Leave").
-		// TODO format receiver name into registered function name.
+		// Function name is prepended with "T." if there is a receiver, where
+		// T is the type of the receiver, dereferenced if it is a pointer.
+		name := n.Name.Name
+		if n.Recv != nil {
+			field := n.Recv.List[0]
+			switch recv := field.Type.(type) {
+			case *ast.StarExpr:
+				name = recv.X.(*ast.Ident).Name + "." + name
+			case *ast.Ident:
+				name = recv.Name + "." + name
+			}
+		}
 		start, end := v.fset.Position(n.Pos()), v.fset.Position(n.End())
-		f := v.pkg.RegisterFunction(n.Name.Name, start.Filename, start.Offset, end.Offset)
+		f := v.pkg.RegisterFunction(name, start.Filename, start.Offset, end.Offset)
 		v.state.functions = append(v.state.functions, f)
-		return &stmtVisitor{v.state, nil}
+		sv := &stmtVisitor{v.state}
+		sv.VisitStmt(n.Body)
+		// TODO function coverage (insert "function.Enter", "function.Leave").
+
+	// TODO come up with naming scheme for function literals.
+	// case *ast.FuncLit:
 	}
 	return v
 }

@@ -173,7 +173,6 @@ func (p *parser) parse() {
 			case "At":
 				p.parseAt(obj.(*Statement))
 			}
-			//p.parseFunctionCall()
 		}
 		p.next()
 		p.expect(token.SEMICOLON)
