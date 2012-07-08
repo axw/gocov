@@ -52,8 +52,16 @@ func usage() {
 	os.Exit(2)
 }
 
+var (
+	testFlags = flag.NewFlagSet("test", flag.ExitOnError)
+	testExcludeFlag = testFlags.String(
+		"exclude", "",
+		"packages to exclude, separated by comma")
+)
+
 type instrumenter struct {
 	gopath       string // temporary gopath
+	excluded     []string
 	instrumented map[string]*gocov.Package
 }
 
@@ -127,6 +135,19 @@ func symlinkHierarchy(src, dst string) error {
 }
 
 func (in *instrumenter) instrumentPackage(pkgpath string) error {
+	// Certain, special packages should always be skipped.
+	switch pkgpath {
+	case "C":
+		return nil
+	}
+
+	// Ignore explicitly excluded packages.
+	if i := sort.SearchStrings(in.excluded, pkgpath); i < len(in.excluded) {
+		if in.excluded[i] == pkgpath {
+			return nil
+		}
+	}
+
 	fset := token.NewFileSet()
 	buildpkg, pkg, err := parsePackage(pkgpath, fset)
 	if err != nil {
@@ -198,9 +219,10 @@ func unmarshalJson(data []byte) (packages []*gocov.Package, err error) {
 }
 
 func instrumentAndTest() (rc int) {
+	testFlags.Parse(os.Args[2:])
 	packageName := "."
-	if flag.NArg() > 1 {
-		packageName = flag.Arg(1)
+	if testFlags.NArg() > 1 {
+		packageName = testFlags.Arg(1)
 	}
 
 	tempDir, err := ioutil.TempDir("", "gocov")
@@ -223,9 +245,16 @@ func instrumentAndTest() (rc int) {
 		return 1
 	}
 
+	var excluded []string
+	if len(*testExcludeFlag) > 0 {
+		excluded = strings.Split(*testExcludeFlag, ",")
+		sort.Strings(excluded)
+	}
+
 	in := &instrumenter{
 		gopath:       tempDir,
-		instrumented: make(map[string]*gocov.Package)}
+		instrumented: make(map[string]*gocov.Package),
+		excluded:     excluded}
 	err = in.instrumentPackage(packageName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to instrument package(%s): %s\n",

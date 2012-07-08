@@ -20,6 +20,11 @@ instrument all imported packages not part of the standard library,
 and run "go test". Upon completion, coverage data will be emitted
 in the form of a JSON document.
 
+Packages will be recursively checked for imports, and those
+packages will also be instrumented. If you wish to exclude a
+package from instrumentation, you can specify an optional exclude
+flag, e.g. `gocov test -exclude comma,separated,packages`.
+
 *gocov report*
 
 Running `gocov report <coverage.json>` will generate a textual
