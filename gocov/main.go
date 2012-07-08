@@ -221,8 +221,8 @@ func unmarshalJson(data []byte) (packages []*gocov.Package, err error) {
 func instrumentAndTest() (rc int) {
 	testFlags.Parse(os.Args[2:])
 	packageName := "."
-	if testFlags.NArg() > 1 {
-		packageName = testFlags.Arg(1)
+	if testFlags.NArg() > 0 {
+		packageName = testFlags.Arg(0)
 	}
 
 	tempDir, err := ioutil.TempDir("", "gocov")
