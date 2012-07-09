@@ -53,11 +53,16 @@ func usage() {
 }
 
 var (
-	testFlags = flag.NewFlagSet("test", flag.ExitOnError)
+	testFlags       = flag.NewFlagSet("test", flag.ExitOnError)
 	testExcludeFlag = testFlags.String(
 		"exclude", "",
 		"packages to exclude, separated by comma")
+	verbose bool
 )
+
+func init() {
+	testFlags.BoolVar(&verbose, "v", false, "verbose")
+}
 
 type instrumenter struct {
 	gopath       string // temporary gopath
@@ -139,6 +144,10 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	switch pkgpath {
 	case "C":
 		return nil
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "instrumenting package %q\n", pkgpath)
 	}
 
 	// Ignore explicitly excluded packages.
