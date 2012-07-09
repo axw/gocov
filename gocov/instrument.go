@@ -174,8 +174,16 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 		in.instrumented[f.Name.Name] = pkgObj
 	}
 	state := &state{fset, f, pkgObj, nil}
-	ast.SortImports(fset, f)
 	ast.Walk(&funcVisitor{state}, f)
+
+	// Count the number of import GenDecl's. They're always first.
+	nImportDecls := 0
+	for _, decl := range f.Decls {
+		if decl, ok := decl.(*ast.GenDecl); !ok || decl.Tok != token.IMPORT {
+			break
+		}
+		nImportDecls++
+	}
 
 	// Insert variable declarations for registered objects.
 	var vardecls []ast.Decl
@@ -202,7 +210,8 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 		}
 	}
 	if len(f.Decls) > 0 {
-		f.Decls = append(f.Decls[:1], append(vardecls, f.Decls[1:]...)...)
+		vardecls = append(vardecls, f.Decls[nImportDecls:]...)
+		f.Decls = append(f.Decls[:nImportDecls], vardecls...)
 	} else {
 		f.Decls = vardecls
 	}
@@ -210,6 +219,7 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 	// Add a "gocov" import.
 	if pkgCreated && len(pkgObj.Functions) > 0 {
 		found := false
+		ast.SortImports(fset, f) // sort each ImportSpec
 		for _, importSpec := range f.Imports {
 			if importSpec.Path.Value == strconv.Quote(gocovPackagePath) {
 				found = true
@@ -221,8 +231,28 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet) error {
 				Path: makeLit(gocovPackagePath).(*ast.BasicLit)}
 			gocovImportGenDecl := &ast.GenDecl{
 				Tok: token.IMPORT, Specs: []ast.Spec{gocovImportSpec}}
-			f.Decls = append([]ast.Decl{gocovImportGenDecl}, f.Decls...)
+			tail := make([]ast.Decl, len(f.Decls)-nImportDecls)
+			copy(tail, f.Decls[nImportDecls:])
+			head := append(f.Decls[:nImportDecls], gocovImportGenDecl)
+			f.Decls = append(head, tail...)
 		}
+	}
+
+	// Clear out all comments except for the comments attached to
+	// existing import specs.
+	if nImportDecls > 0 {
+		end := f.Decls[nImportDecls-1].Pos()
+		comments := make([]*ast.CommentGroup, 0, len(f.Comments))
+		for _, group := range f.Comments {
+			if group.End() < end {
+				comments = append(comments, group)
+			} else {
+				break
+			}
+		}
+		f.Comments = comments
+	} else {
+		f.Comments = []*ast.CommentGroup{}
 	}
 
 	return nil

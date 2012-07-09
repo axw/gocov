@@ -56,6 +56,10 @@ var (
 	testFlags       = flag.NewFlagSet("test", flag.ExitOnError)
 	testExcludeFlag = testFlags.String(
 		"exclude", "",
+		"print the name of the temporary work directory "+
+			"and do not delete it when exiting.")
+	testWorkFlag = testFlags.Bool(
+		"work", false,
 		"packages to exclude, separated by comma")
 	verbose bool
 )
@@ -89,13 +93,15 @@ func parsePackage(path string, fset *token.FileSet) (*build.Package, *ast.Packag
 	if err != nil {
 		return nil, nil, err
 	}
-	sort.Strings(p.GoFiles)
+	goFiles := append(p.GoFiles[:], p.CgoFiles...)
+	sort.Strings(goFiles)
 	filter := func(f os.FileInfo) bool {
 		name := f.Name()
-		i := sort.SearchStrings(p.GoFiles, name)
-		return i < len(p.GoFiles) && p.GoFiles[i] == name
+		i := sort.SearchStrings(goFiles, name)
+		return i < len(goFiles) && goFiles[i] == name
 	}
-	pkgs, err := parser.ParseDir(fset, p.Dir, filter, parser.DeclarationErrors)
+	mode := parser.DeclarationErrors | parser.ParseComments
+	pkgs, err := parser.ParseDir(fset, p.Dir, filter, mode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -153,6 +159,9 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	// Ignore explicitly excluded packages.
 	if i := sort.SearchStrings(in.excluded, pkgpath); i < len(in.excluded) {
 		if in.excluded[i] == pkgpath {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "\texcluded\n")
+			}
 			return nil
 		}
 	}
@@ -165,6 +174,9 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	in.instrumented[pkgpath] = nil // created in first instrumented file
 	if buildpkg.Goroot {
 		// ignore packages in GOROOT
+		if verbose {
+			fmt.Fprintf(os.Stderr, "\tskipping package in GOROOT\n")
+		}
 		return nil
 	}
 
@@ -239,13 +251,17 @@ func instrumentAndTest() (rc int) {
 		fmt.Fprintf(os.Stderr, "failed to create temporary GOPATH: %s", err)
 		return 1
 	}
-	defer func() {
-		err := os.RemoveAll(tempDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr,
-				"warning: failed to delete temporary GOPATH (%s)", tempDir)
-		}
-	}()
+	if *testWorkFlag {
+		fmt.Fprintf(os.Stderr, "WORK=%s\n", tempDir)
+	} else {
+		defer func() {
+			err := os.RemoveAll(tempDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr,
+					"warning: failed to delete temporary GOPATH (%s)", tempDir)
+			}
+		}()
+	}
 
 	err = os.Mkdir(filepath.Join(tempDir, "src"), 0700)
 	if err != nil {
@@ -282,7 +298,12 @@ func instrumentAndTest() (rc int) {
 	} else {
 		env = putenv(env, "GOPATH", tempDir)
 	}
-	cmd := exec.Command("go", "test", "-v", packageName)
+	args := []string{"test"}
+	if verbose {
+		args = append(args, "-v")
+	}
+	args = append(args, packageName)
+	cmd := exec.Command("go", args...)
 	cmd.Env = env
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
