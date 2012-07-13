@@ -78,7 +78,13 @@ func annotateSource() (rc int) {
 		return 1
 	}
 
-	data, err := ioutil.ReadFile(flag.Arg(1))
+	var data []byte
+	var err error
+	if filename := flag.Arg(1); filename == "-" {
+		data, err = ioutil.ReadAll(os.Stdin)
+	} else {
+		data, err = ioutil.ReadFile(filename)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to read coverage file: %s\n", err)
 		return 1
