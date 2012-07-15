@@ -40,6 +40,7 @@ import (
 )
 
 const gocovPackagePath = "github.com/axw/gocov"
+const instrumentedPathPrefix = gocovPackagePath + "/instrumented"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n\n\tgocov command [arguments]\n\n")
@@ -58,6 +59,9 @@ var (
 		"exclude", "",
 		"print the name of the temporary work directory "+
 			"and do not delete it when exiting.")
+	testExcludeGorootFlag = testFlags.Bool(
+		"exclude-goroot", true,
+		"exclude packages in GOROOT from instrumentation")
 	testWorkFlag = testFlags.Bool(
 		"work", false,
 		"packages to exclude, separated by comma")
@@ -72,6 +76,7 @@ type instrumenter struct {
 	gopath       string // temporary gopath
 	excluded     []string
 	instrumented map[string]*gocov.Package
+	processed    map[string]struct{}
 }
 
 func putenv(env []string, key, value string) []string {
@@ -120,6 +125,10 @@ func symlinkHierarchy(src, dst string) error {
 		}
 
 		target := filepath.Join(dst, rel)
+		if _, err = os.Stat(target); err == nil {
+			return nil
+		}
+
 		if info.IsDir() {
 			return os.MkdirAll(target, 0700)
 		} else {
@@ -145,22 +154,54 @@ func symlinkHierarchy(src, dst string) error {
 	return filepath.Walk(src, fn)
 }
 
+// FIXME(axw)
+//
+// As we change the name of the package to avoid being obscured by GOROOT, we
+// can't instrument packages that have Go functions implemented in C, such as
+// those below.
+//
+// It may be preferable to have a faked GOROOT, but we'll need to come up with
+// a way to avoid the import loop introduced by importing gocov into the
+// instrumented pakcage.
+//
+func instrumentable(path string) bool {
+	switch path {
+	case "C": fallthrough
+	case "reflect": fallthrough
+	case "runtime": fallthrough
+	case "os": fallthrough
+	case "sync": fallthrough
+	case "syscall": fallthrough
+	case "time": fallthrough
+	case "testing": fallthrough
+	case "unsafe": return false
+	}
+	return true
+}
+
 func (in *instrumenter) instrumentPackage(pkgpath string) error {
-	// Certain, special packages should always be skipped.
-	switch pkgpath {
-	case "C":
+	if _, already := in.processed[pkgpath]; already {
 		return nil
 	}
+	defer func(){
+		if _, already := in.instrumented[pkgpath]; !already {
+			in.processed[pkgpath] = struct{}{}
+		}
+	}()
 
-	if verbose {
-		fmt.Fprintf(os.Stderr, "instrumenting package %q\n", pkgpath)
+	// Certain packages should always be skipped.
+	if !instrumentable(pkgpath) {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "skipping uninstrumentable package %q\n", pkgpath)
+		}
+		return nil
 	}
 
 	// Ignore explicitly excluded packages.
 	if i := sort.SearchStrings(in.excluded, pkgpath); i < len(in.excluded) {
 		if in.excluded[i] == pkgpath {
 			if verbose {
-				fmt.Fprintf(os.Stderr, "\texcluded\n")
+				fmt.Fprintf(os.Stderr, "skipping excluded package %q\n", pkgpath)
 			}
 			return nil
 		}
@@ -171,55 +212,74 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	if err != nil {
 		return err
 	}
-	in.instrumented[pkgpath] = nil // created in first instrumented file
-	if buildpkg.Goroot {
-		// ignore packages in GOROOT
+	if buildpkg.Goroot && *testExcludeGorootFlag {
 		if verbose {
-			fmt.Fprintf(os.Stderr, "\tskipping package in GOROOT\n")
+			fmt.Fprintf(os.Stderr, "skipping GOROOT package %q\n", pkgpath)
 		}
 		return nil
 	}
 
-	// Clone the directory structure, symlinking files (if possible),
-	// otherwise copying the files. Instrumented files will replace
-	// the symlinks with new files.
-	cloneDir := filepath.Join(in.gopath, "src", pkgpath)
-	err = symlinkHierarchy(buildpkg.Dir, cloneDir)
-
-	for filename, f := range pkg.Files {
-		err := in.instrumentFile(f, fset)
-		if err != nil {
-			return err
-		}
-
-		if err == nil {
-			filepath := filepath.Join(cloneDir, filepath.Base(filename))
-			err = os.Remove(filepath)
-			if err != nil {
-				return err
-			}
-			file, err := os.OpenFile(filepath, os.O_RDWR|os.O_CREATE, 0600)
-			if err != nil {
-				return err
-			}
-			printer.Fprint(file, fset, f) // TODO check err?
-			err = file.Close()
-			if err != nil {
-				return err
-			}
-		}
-		if err != nil {
-			return err
-		}
+	in.instrumented[pkgpath] = nil // created in first instrumented file
+	if verbose {
+		fmt.Fprintf(os.Stderr, "instrumenting package %q\n", pkgpath)
 	}
 
-	// TODO include/exclude package names with a pattern.
-	for _, subpkgpath := range buildpkg.Imports {
+	imports := buildpkg.Imports[:]
+	imports = append(imports, buildpkg.TestImports...)
+	imports = append(imports, buildpkg.XTestImports...)
+	for _, subpkgpath := range imports {
 		if _, done := in.instrumented[subpkgpath]; !done {
 			err = in.instrumentPackage(subpkgpath)
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	// Fix imports in test files, but don't instrument them.
+	rewriteFiles := make(map[string]*ast.File)
+	testGoFiles := buildpkg.TestGoFiles[:]
+	testGoFiles = append(testGoFiles, buildpkg.XTestGoFiles...)
+	for _, filename := range testGoFiles {
+		path := filepath.Join(buildpkg.Dir, filename)
+		mode := parser.DeclarationErrors | parser.ParseComments
+		file, err := parser.ParseFile(fset, path, nil, mode)
+		if err != nil {
+			return err
+		}
+		in.redirectImports(file)
+		rewriteFiles[filename] = file
+	}
+
+	// Clone the directory structure, symlinking files (if possible),
+	// otherwise copying the files. Instrumented files will replace
+	// the symlinks with new files.
+	cloneDir := filepath.Join(in.gopath, "src", instrumentedPathPrefix, pkgpath)
+	err = symlinkHierarchy(buildpkg.Dir, cloneDir)
+	if err != nil {
+		return err
+	}
+	for filename, f := range pkg.Files {
+		err := in.instrumentFile(f, fset, pkgpath)
+		if err != nil {
+			return err
+		}
+		rewriteFiles[filename] = f
+	}
+	for filename, f := range rewriteFiles {
+		filepath := filepath.Join(cloneDir, filepath.Base(filename))
+		err = os.Remove(filepath)
+		if err != nil {
+			return err
+		}
+		file, err := os.OpenFile(filepath, os.O_RDWR|os.O_CREATE, 0600)
+		if err != nil {
+			return err
+		}
+		printer.Fprint(file, fset, f) // TODO check err?
+		err = file.Close()
+		if err != nil {
+			return err
 		}
 	}
 
@@ -270,6 +330,19 @@ func instrumentAndTest() (rc int) {
 		return 1
 	}
 
+	// Copy gocov into the temporary GOPATH, since otherwise it'll
+	// be eclipsed by the instrumented packages root.
+	if p, err := build.Import(gocovPackagePath, "", build.FindOnly); err == nil {
+		err = symlinkHierarchy(p.Dir, filepath.Join(tempDir, "src", gocovPackagePath))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to symlink gocov: %s", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "failed to locate gocov: %s", err)
+		return 1
+	}
+
 	var excluded []string
 	if len(*testExcludeFlag) > 0 {
 		excluded = strings.Split(*testExcludeFlag, ",")
@@ -279,7 +352,8 @@ func instrumentAndTest() (rc int) {
 	in := &instrumenter{
 		gopath:       tempDir,
 		instrumented: make(map[string]*gocov.Package),
-		excluded:     excluded}
+		excluded:     excluded,
+		processed:    make(map[string]struct{})}
 	err = in.instrumentPackage(packageName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to instrument package(%s): %s\n",
@@ -302,7 +376,7 @@ func instrumentAndTest() (rc int) {
 	if verbose {
 		args = append(args, "-v")
 	}
-	args = append(args, packageName)
+	args = append(args, instrumentedPathPrefix + "/" + packageName)
 	cmd := exec.Command("go", args...)
 	cmd.Env = env
 	cmd.Stdout = os.Stderr
