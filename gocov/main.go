@@ -260,7 +260,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 		return err
 	}
 	for filename, f := range pkg.Files {
-		err := in.instrumentFile(f, fset, pkgpath)
+		err := in.instrumentFile(filename, f, fset, pkgpath)
 		if err != nil {
 			return err
 		}
