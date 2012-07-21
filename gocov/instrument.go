@@ -21,9 +21,13 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"github.com/axw/gocov"
 	"go/ast"
+	"go/parser"
+	"go/printer"
 	"go/token"
 	"strconv"
 )
@@ -177,7 +181,32 @@ func (in *instrumenter) redirectImports(f *ast.File) {
 	}
 }
 
-func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath string) error {
+type reinsertComments struct {
+	funcs      map[string]*ast.FuncDecl
+	fileSet    *token.FileSet
+	content    []byte
+	bytesAdded int
+}
+
+func (ric *reinsertComments) Visit(node ast.Node) ast.Visitor {
+	switch node := node.(type) {
+	case *ast.FuncDecl:
+		if fun := ric.funcs[node.Name.String()]; fun != nil {
+			baseOffset := ric.fileSet.File(node.Pos()).Base()
+			index := int(node.Pos()) - baseOffset + ric.bytesAdded
+			var toInsert string
+			for _, line := range fun.Doc.List {
+				toInsert += line.Text + "\n"
+			}
+			ric.bytesAdded += len(toInsert)
+
+			ric.content = append(ric.content[:index], append([]byte(toInsert), ric.content[index:]...)...)
+		}
+	}
+	return ric
+}
+
+func (in *instrumenter) instrumentFile(filename string, f *ast.File, fset *token.FileSet, pkgpath string) error {
 	pkgObj := in.instrumented[pkgpath]
 	pkgCreated := false
 	if pkgObj == nil {
@@ -241,6 +270,14 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 		f.Decls = append(head, tail...)
 	}
 
+	// Record function comment associations
+	var funcComments = make(map[string]*ast.FuncDecl, 0)
+	for _, decl := range f.Decls {
+		if n, ok := decl.(*ast.FuncDecl); ok && n.Doc != nil {
+			funcComments[n.Name.String()] = n
+		}
+	}
+
 	// Clear out all comments except for the comments attached to
 	// existing import specs.
 	if nImportDecls > 0 {
@@ -258,5 +295,19 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 		f.Comments = []*ast.CommentGroup{}
 	}
 
-	return nil
+	// Print and reparse to reinsert comments
+	o := bytes.NewBuffer(make([]byte,0,512))
+	printer.Fprint(o, fset, f)
+
+	parserMode := parser.DeclarationErrors|parser.ParseComments
+	reparsed, err := parser.ParseFile(fset, filename, o, parserMode)
+	if err != nil {
+		return errors.New(fmt.Sprint("second pass parse error:", err))
+	}
+	ric := &reinsertComments{funcs: funcComments, fileSet: fset, content: o.Bytes()}
+	ast.Walk(ric, reparsed)
+	reparsed, err = parser.ParseFile(fset, filename, ric.content, parserMode)
+	*f = *reparsed
+
+	return err
 }

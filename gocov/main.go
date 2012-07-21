@@ -57,14 +57,14 @@ var (
 	testFlags       = flag.NewFlagSet("test", flag.ExitOnError)
 	testExcludeFlag = testFlags.String(
 		"exclude", "",
-		"print the name of the temporary work directory "+
-			"and do not delete it when exiting.")
+		"packages to exclude, separated by comma")
 	testExcludeGorootFlag = testFlags.Bool(
 		"exclude-goroot", true,
 		"exclude packages in GOROOT from instrumentation")
 	testWorkFlag = testFlags.Bool(
 		"work", false,
-		"packages to exclude, separated by comma")
+		"print the name of the temporary work directory "+
+			"and do not delete it when exiting.")
 	verbose bool
 )
 
@@ -260,7 +260,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 		return err
 	}
 	for filename, f := range pkg.Files {
-		err := in.instrumentFile(f, fset, pkgpath)
+		err := in.instrumentFile(filename, f, fset, pkgpath)
 		if err != nil {
 			return err
 		}
