@@ -241,22 +241,9 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 		f.Decls = append(head, tail...)
 	}
 
-	// Clear out all comments except for the comments attached to
-	// existing import specs.
-	if nImportDecls > 0 {
-		end := f.Decls[nImportDecls-1].Pos()
-		comments := make([]*ast.CommentGroup, 0, len(f.Comments))
-		for _, group := range f.Comments {
-			if group.End() < end {
-				comments = append(comments, group)
-			} else {
-				break
-			}
-		}
-		f.Comments = comments
-	} else {
-		f.Comments = []*ast.CommentGroup{}
-	}
+	// Clear out all cached comments. This forces the AST printer to use
+	// node comments instead, repositioning them correctly.
+	f.Comments = nil
 
 	return nil
 }
