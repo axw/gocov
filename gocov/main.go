@@ -57,14 +57,14 @@ var (
 	testFlags       = flag.NewFlagSet("test", flag.ExitOnError)
 	testExcludeFlag = testFlags.String(
 		"exclude", "",
-		"print the name of the temporary work directory "+
-			"and do not delete it when exiting.")
+		"packages to exclude, separated by comma")
 	testExcludeGorootFlag = testFlags.Bool(
 		"exclude-goroot", true,
 		"exclude packages in GOROOT from instrumentation")
 	testWorkFlag = testFlags.Bool(
 		"work", false,
-		"packages to exclude, separated by comma")
+		"print the name of the temporary work directory "+
+			"and do not delete it when exiting")
 	verbose bool
 )
 
@@ -166,15 +166,24 @@ func symlinkHierarchy(src, dst string) error {
 //
 func instrumentable(path string) bool {
 	switch path {
-	case "C": fallthrough
-	case "reflect": fallthrough
-	case "runtime": fallthrough
-	case "os": fallthrough
-	case "sync": fallthrough
-	case "syscall": fallthrough
-	case "time": fallthrough
-	case "testing": fallthrough
-	case "unsafe": return false
+	case "C":
+		fallthrough
+	case "reflect":
+		fallthrough
+	case "runtime":
+		fallthrough
+	case "os":
+		fallthrough
+	case "sync":
+		fallthrough
+	case "syscall":
+		fallthrough
+	case "time":
+		fallthrough
+	case "testing":
+		fallthrough
+	case "unsafe":
+		return false
 	}
 	return true
 }
@@ -183,7 +192,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	if _, already := in.processed[pkgpath]; already {
 		return nil
 	}
-	defer func(){
+	defer func() {
 		if _, already := in.instrumented[pkgpath]; !already {
 			in.processed[pkgpath] = struct{}{}
 		}
@@ -376,7 +385,7 @@ func instrumentAndTest() (rc int) {
 	if verbose {
 		args = append(args, "-v")
 	}
-	args = append(args, instrumentedPathPrefix + "/" + packageName)
+	args = append(args, instrumentedPathPrefix+"/"+packageName)
 	cmd := exec.Command("go", args...)
 	cmd.Env = env
 	cmd.Stdout = os.Stderr
