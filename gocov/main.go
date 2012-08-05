@@ -72,6 +72,16 @@ func init() {
 	testFlags.BoolVar(&verbose, "v", false, "verbose")
 }
 
+func errorf(f string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, f, args...)
+}
+
+func verbosef(f string, args ...interface{}) {
+	if verbose {
+		fmt.Fprintf(os.Stderr, f, args...)
+	}
+}
+
 type instrumenter struct {
 	gopath       string // temporary gopath
 	excluded     []string
@@ -193,25 +203,21 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 		return nil
 	}
 	defer func() {
-		if _, already := in.instrumented[pkgpath]; !already {
+		if _, instrumented := in.instrumented[pkgpath]; !instrumented {
 			in.processed[pkgpath] = struct{}{}
 		}
 	}()
 
 	// Certain packages should always be skipped.
 	if !instrumentable(pkgpath) {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "skipping uninstrumentable package %q\n", pkgpath)
-		}
+		verbosef("skipping uninstrumentable package %q\n", pkgpath)
 		return nil
 	}
 
 	// Ignore explicitly excluded packages.
 	if i := sort.SearchStrings(in.excluded, pkgpath); i < len(in.excluded) {
 		if in.excluded[i] == pkgpath {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "skipping excluded package %q\n", pkgpath)
-			}
+			verbosef("skipping excluded package %q\n", pkgpath)
 			return nil
 		}
 	}
@@ -222,16 +228,12 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 		return err
 	}
 	if buildpkg.Goroot && *testExcludeGorootFlag {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "skipping GOROOT package %q\n", pkgpath)
-		}
+		verbosef("skipping GOROOT package %q\n", pkgpath)
 		return nil
 	}
 
 	in.instrumented[pkgpath] = nil // created in first instrumented file
-	if verbose {
-		fmt.Fprintf(os.Stderr, "instrumenting package %q\n", pkgpath)
-	}
+	verbosef("instrumenting package %q\n", pkgpath)
 
 	imports := buildpkg.Imports[:]
 	imports = append(imports, buildpkg.TestImports...)
@@ -268,12 +270,15 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	if err != nil {
 		return err
 	}
-	for filename, f := range pkg.Files {
-		err := in.instrumentFile(f, fset, pkgpath)
-		if err != nil {
-			return err
+	// pkg == nil if there are only test files.
+	if pkg != nil {
+		for filename, f := range pkg.Files {
+			err := in.instrumentFile(f, fset, pkgpath)
+			if err != nil {
+				return err
+			}
+			rewriteFiles[filename] = f
 		}
-		rewriteFiles[filename] = f
 	}
 	for filename, f := range rewriteFiles {
 		filepath := filepath.Join(cloneDir, filepath.Base(filename))
@@ -317,7 +322,7 @@ func instrumentAndTest() (rc int) {
 
 	tempDir, err := ioutil.TempDir("", "gocov")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create temporary GOPATH: %s", err)
+		errorf("failed to create temporary GOPATH: %s", err)
 		return 1
 	}
 	if *testWorkFlag {
@@ -334,8 +339,7 @@ func instrumentAndTest() (rc int) {
 
 	err = os.Mkdir(filepath.Join(tempDir, "src"), 0700)
 	if err != nil {
-		fmt.Fprintf(os.Stderr,
-			"failed to create temporary src directory: %s", err)
+		errorf("failed to create temporary src directory: %s", err)
 		return 1
 	}
 
@@ -344,11 +348,11 @@ func instrumentAndTest() (rc int) {
 	if p, err := build.Import(gocovPackagePath, "", build.FindOnly); err == nil {
 		err = symlinkHierarchy(p.Dir, filepath.Join(tempDir, "src", gocovPackagePath))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to symlink gocov: %s", err)
+			errorf("failed to symlink gocov: %s", err)
 			return 1
 		}
 	} else {
-		fmt.Fprintf(os.Stderr, "failed to locate gocov: %s", err)
+		errorf("failed to locate gocov: %s", err)
 		return 1
 	}
 
@@ -365,8 +369,18 @@ func instrumentAndTest() (rc int) {
 		processed:    make(map[string]struct{})}
 	err = in.instrumentPackage(packageName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to instrument package(%s): %s\n",
-			packageName, err)
+		errorf("failed to instrument package(%s): %s\n", packageName, err)
+		return 1
+	}
+
+	ninstrumented := 0
+	for _, pkg := range in.instrumented {
+		if pkg != nil {
+			ninstrumented++
+		}
+	}
+	if ninstrumented == 0 {
+		errorf("error: no packages were instrumented\n")
 		return 1
 	}
 
@@ -393,17 +407,19 @@ func instrumentAndTest() (rc int) {
 	err = cmd.Run()
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "go test failed: %s\n", err)
+		errorf("go test failed: %s\n", err)
 		rc = 1
 	}
 
 	packages, err := gocov.ParseTrace(outfilePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to parse gocov output: %s\n", err)
+		errorf("failed to parse gocov output: %s\n", err)
+		rc = 1
 	} else {
 		data, err := marshalJson(packages)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to format as JSON: %s\n", err)
+			errorf("failed to format as JSON: %s\n", err)
+			rc = 1
 		} else {
 			fmt.Println(string(data))
 		}
