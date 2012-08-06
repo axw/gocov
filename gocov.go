@@ -26,6 +26,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync"
 	"sync/atomic"
 )
 
@@ -110,6 +111,8 @@ const (
 
 // Coverage context.
 type Context struct {
+	sync.Mutex
+
 	// ObjectList is a sorted list of coverage objects
 	// (packages, functions, etc.)
 	Objects ObjectList
@@ -145,7 +148,9 @@ func init() {
 
 func (c *Context) logf(format string, args ...interface{}) {
 	if c.Tracer != nil {
+		c.Lock()
 		fmt.Fprintf(c.Tracer, format, args...)
+		c.Unlock()
 	}
 }
 
