@@ -48,6 +48,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tannotate\n")
 	fmt.Fprintf(os.Stderr, "\ttest\n")
 	fmt.Fprintf(os.Stderr, "\treport\n")
+	fmt.Fprintf(os.Stderr, "\thtmlreport\n")
 	fmt.Fprintf(os.Stderr, "\n")
 	flag.PrintDefaults()
 	os.Exit(2)
@@ -65,7 +66,9 @@ var (
 		"work", false,
 		"print the name of the temporary work directory "+
 			"and do not delete it when exiting")
-	verbose bool
+	verbose       bool
+	fullAnnotation bool = false
+	html       bool = false
 )
 
 func init() {
@@ -438,6 +441,8 @@ func main() {
 			os.Exit(annotateSource())
 		case "report":
 			os.Exit(reportCoverage())
+		case "htmlreport":
+			os.Exit(htmlReport())
 		case "test":
 			os.Exit(instrumentAndTest())
 		//case "run"

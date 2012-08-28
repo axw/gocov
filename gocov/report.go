@@ -102,15 +102,19 @@ func (r *report) clear() {
 // PrintReport prints a coverage report to the given writer.
 func printReport(w io.Writer, r *report) {
 	w = tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
+	printHeader(w, "Gocov Coverage Report")
 	//fmt.Fprintln(w, "Package\tFunction\tStatements\t")
 	//fmt.Fprintln(w, "-------\t--------\t---------\t")
 	for _, pkg := range r.packages {
 		printPackage(w, pkg)
 		fmt.Fprintln(w)
 	}
+	printFooter(w)
 }
 
 func printPackage(w io.Writer, pkg *gocov.Package) {
+	var totalStatements = 0
+	var totalReached = 0
 	functions := make(reportFunctionList, len(pkg.Functions))
 	for i, fn := range pkg.Functions {
 		reached := 0
@@ -120,19 +124,40 @@ func printPackage(w io.Writer, pkg *gocov.Package) {
 			}
 		}
 		functions[i] = reportFunction{fn, reached}
+		if html {
+			annotateFunctionToFile(fn, pkg)
+		}
 	}
 	sort.Sort(reverse{functions})
-
+	printPackageHeader(w, pkg)
 	for _, fn := range functions {
-		reached := fn.statementsReached
-		var stmtPercent float64 = 0
-		if len(fn.Statements) > 0 {
-			stmtPercent = float64(reached) / float64(len(fn.Statements)) * 100
+		stmtPercent := funcCoveragePercent(fn)
+		if html {
+			var fullFunctionName string = pkg.Name + "." + fn.Name
+			fmt.Fprintf(w, " <TR><TD>%s/%s</TD><TD class=\"function\"><A HREF=\"%s.html\"> %s</A></TD><TD class=\"percentage\">%.2f%%</TD> <TD class=\"lines\">(%d/%d)</TD></TR>\n",
+				pkg.Name, filepath.Base(fn.File), fullFunctionName, fn.Name, stmtPercent,
+				fn.statementsReached, len(fn.Statements))
+		} else {
+			fmt.Fprintf(w, "%s/%s\t %s\t %.2f%% (%d/%d)\n",
+				pkg.Name, filepath.Base(fn.File), fn.Name, stmtPercent,
+				fn.statementsReached, len(fn.Statements))
 		}
-		fmt.Fprintf(w, "%s/%s\t %s\t %.2f%% (%d/%d)\n",
-			pkg.Name, filepath.Base(fn.File), fn.Name, stmtPercent,
-			reached, len(fn.Statements))
+		totalStatements = totalStatements + len(fn.Statements)
+		totalReached = totalReached + fn.statementsReached
 	}
+	printPackageFooter(w, totalReached, totalStatements, calculateCoveragePercent(totalReached, totalStatements))
+}
+
+func funcCoveragePercent(fn reportFunction) (percent float64) {
+	return calculateCoveragePercent(fn.statementsReached, len(fn.Statements))
+}
+
+func calculateCoveragePercent(reached int, statements int) (percent float64) {
+	percent = 0
+	if statements > 0 {
+		percent = float64(reached) / float64(statements) * 100
+	}
+	return
 }
 
 func reportCoverage() (rc int) {
