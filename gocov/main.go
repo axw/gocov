@@ -87,6 +87,7 @@ type instrumenter struct {
 	excluded     []string
 	instrumented map[string]*gocov.Package
 	processed    map[string]struct{}
+	workingdir   string // path of package currently being processed
 }
 
 func putenv(env []string, key, value string) []string {
@@ -99,12 +100,8 @@ func putenv(env []string, key, value string) []string {
 	return append(env, key+"="+value)
 }
 
-func parsePackage(path string, fset *token.FileSet) (*build.Package, *ast.Package, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, nil, err
-	}
-	p, err := build.Import(path, cwd, 0)
+func (in *instrumenter) parsePackage(path string, fset *token.FileSet) (*build.Package, *ast.Package, error) {
+	p, err := build.Import(path, in.workingdir, 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -198,7 +195,19 @@ func instrumentable(path string) bool {
 	return true
 }
 
-func (in *instrumenter) instrumentPackage(pkgpath string) error {
+// abspkgpath converts a possibly local import path to an absolute package path.
+func (in *instrumenter) abspkgpath(pkgpath string) (error, string) {
+	if pkgpath == "C" || pkgpath == "unsafe" {
+		return nil, pkgpath
+	}
+	p, err := build.Import(pkgpath, in.workingdir, build.FindOnly)
+	if err != nil {
+		return err, ""
+	}
+	return nil, p.ImportPath
+}
+
+func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) error {
 	if _, already := in.processed[pkgpath]; already {
 		return nil
 	}
@@ -223,7 +232,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	}
 
 	fset := token.NewFileSet()
-	buildpkg, pkg, err := parsePackage(pkgpath, fset)
+	buildpkg, pkg, err := in.parsePackage(pkgpath, fset)
 	if err != nil {
 		return err
 	}
@@ -235,12 +244,28 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 	in.instrumented[pkgpath] = nil // created in first instrumented file
 	verbosef("instrumenting package %q\n", pkgpath)
 
+	if testPackage && len(buildpkg.TestGoFiles)+len(buildpkg.XTestGoFiles) == 0 {
+		return fmt.Errorf("no test files")
+	}
+
+	// Set a "working directory", for resolving relative imports.
+	defer func(oldworkingdir string) {
+		in.workingdir = oldworkingdir
+	}(in.workingdir)
+	in.workingdir = buildpkg.Dir
+
 	imports := buildpkg.Imports[:]
-	imports = append(imports, buildpkg.TestImports...)
-	imports = append(imports, buildpkg.XTestImports...)
+	if testPackage {
+		imports = append(imports, buildpkg.TestImports...)
+		imports = append(imports, buildpkg.XTestImports...)
+	}
 	for _, subpkgpath := range imports {
+		err, subpkgpath = in.abspkgpath(subpkgpath)
+		if err != nil {
+			return err
+		}
 		if _, done := in.instrumented[subpkgpath]; !done {
-			err = in.instrumentPackage(subpkgpath)
+			err = in.instrumentPackage(subpkgpath, false)
 			if err != nil {
 				return err
 			}
@@ -249,17 +274,19 @@ func (in *instrumenter) instrumentPackage(pkgpath string) error {
 
 	// Fix imports in test files, but don't instrument them.
 	rewriteFiles := make(map[string]*ast.File)
-	testGoFiles := buildpkg.TestGoFiles[:]
-	testGoFiles = append(testGoFiles, buildpkg.XTestGoFiles...)
-	for _, filename := range testGoFiles {
-		path := filepath.Join(buildpkg.Dir, filename)
-		mode := parser.DeclarationErrors | parser.ParseComments
-		file, err := parser.ParseFile(fset, path, nil, mode)
-		if err != nil {
-			return err
+	if testPackage {
+		testGoFiles := buildpkg.TestGoFiles[:]
+		testGoFiles = append(testGoFiles, buildpkg.XTestGoFiles...)
+		for _, filename := range testGoFiles {
+			path := filepath.Join(buildpkg.Dir, filename)
+			mode := parser.DeclarationErrors | parser.ParseComments
+			file, err := parser.ParseFile(fset, path, nil, mode)
+			if err != nil {
+				return err
+			}
+			in.redirectImports(file)
+			rewriteFiles[filename] = file
 		}
-		in.redirectImports(file)
-		rewriteFiles[filename] = file
 	}
 
 	// Clone the directory structure, symlinking files (if possible),
@@ -322,7 +349,7 @@ func instrumentAndTest() (rc int) {
 
 	tempDir, err := ioutil.TempDir("", "gocov")
 	if err != nil {
-		errorf("failed to create temporary GOPATH: %s", err)
+		errorf("failed to create temporary GOPATH: %s\n", err)
 		return 1
 	}
 	if *testWorkFlag {
@@ -332,14 +359,14 @@ func instrumentAndTest() (rc int) {
 			err := os.RemoveAll(tempDir)
 			if err != nil {
 				fmt.Fprintf(os.Stderr,
-					"warning: failed to delete temporary GOPATH (%s)", tempDir)
+					"warning: failed to delete temporary GOPATH (%s)\n", tempDir)
 			}
 		}()
 	}
 
 	err = os.Mkdir(filepath.Join(tempDir, "src"), 0700)
 	if err != nil {
-		errorf("failed to create temporary src directory: %s", err)
+		errorf("failed to create temporary src directory: %s\n", err)
 		return 1
 	}
 
@@ -348,11 +375,11 @@ func instrumentAndTest() (rc int) {
 	if p, err := build.Import(gocovPackagePath, "", build.FindOnly); err == nil {
 		err = symlinkHierarchy(p.Dir, filepath.Join(tempDir, "src", gocovPackagePath))
 		if err != nil {
-			errorf("failed to symlink gocov: %s", err)
+			errorf("failed to symlink gocov: %s\n", err)
 			return 1
 		}
 	} else {
-		errorf("failed to locate gocov: %s", err)
+		errorf("failed to locate gocov: %s\n", err)
 		return 1
 	}
 
@@ -362,12 +389,23 @@ func instrumentAndTest() (rc int) {
 		sort.Strings(excluded)
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		errorf("failed to determine current working directory: %s\n", err)
+	}
+
 	in := &instrumenter{
 		gopath:       tempDir,
 		instrumented: make(map[string]*gocov.Package),
 		excluded:     excluded,
-		processed:    make(map[string]struct{})}
-	err = in.instrumentPackage(packageName)
+		processed:    make(map[string]struct{}),
+		workingdir:   cwd}
+	err, packageName = in.abspkgpath(packageName)
+	if err != nil {
+		errorf("failed to resolve package path(%s): %s\n", err)
+		return 1
+	}
+	err = in.instrumentPackage(packageName, true)
 	if err != nil {
 		errorf("failed to instrument package(%s): %s\n", packageName, err)
 		return 1
