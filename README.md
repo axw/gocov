@@ -6,12 +6,12 @@ Coverage testing tool for The Go Programming Language (work-in-progress)
 Installation
 ============
 
-go get github.com/axw/gocov/gocov
+```go get github.com/axw/gocov/gocov```
 
 Usage
 =====
 
-There are currently three gocov commands: test, report, annotate.
+There are currently three gocov commands: ```test```, ```report``` and ```annotate```.
 
 *gocov test*
 
@@ -30,6 +30,12 @@ flag, e.g. `gocov test -exclude comma,separated,packages`.
 Running `gocov report <coverage.json>` will generate a textual
 report from the coverage data output by `gocov test`. It is
 assumed that the source code has not changed in between.
+
+Output from ```gocov test``` is logged to stdout so users with 
+POSIX compatible terminals can direct the output to ```gocov report``` 
+to view a summary of the test coverage, for example: -
+
+    gocov test mypackage | gocov report
 
 *gocov annotate*
 
