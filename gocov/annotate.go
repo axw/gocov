@@ -26,6 +26,7 @@ import (
 	"github.com/axw/gocov"
 	"go/token"
 	"io/ioutil"
+	"io"
 	"math"
 	"os"
 	"sort"
@@ -35,6 +36,9 @@ import (
 const (
 	hitPrefix  = "    "
 	missPrefix = "MISS"
+	htmlMissClass = "miss"
+	htmlHitClass = "hit"
+	htmlFooter = "</BODY></HTML>"
 )
 
 type packageList []*gocov.Package
@@ -127,7 +131,7 @@ func annotateSource() (rc int) {
 			})
 			if i < len(pkg.Functions) && pkg.Functions[i].Name == funcName {
 				fn := pkg.Functions[i]
-				err := a.printFunctionSource(fn)
+				err := a.printFunctionSource(os.Stdout, fn)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "warning: failed to annotate function '%s.%s'\n",
 						pkgName, funcName)
@@ -150,7 +154,24 @@ func annotateSource() (rc int) {
 	return
 }
 
-func (a *annotator) printFunctionSource(fn *gocov.Function) error {
+// NOTE Non-ideal as it creates still a new annotator for each run
+func annotateFunctionToFile(fn *gocov.Function, pkg *gocov.Package){
+	a := &annotator{}
+	a.fset = token.NewFileSet()
+	a.files = make(map[string]*token.File)
+	var fullFunctionName string = pkg.Name + "." + fn.Name
+	f, err := os.OpenFile(fullFunctionName + ".html", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666) 
+	if err != nil {
+		return 
+	}  
+    defer f.Close()
+	error := a.printFunctionSource(f, fn)
+	if error != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to annotate function '%s.'\n", fn.Name)
+	}
+}
+
+func (a *annotator) printFunctionSource(w io.Writer, fn *gocov.Function) error {
 	// Load the file for line information. Probably overkill, maybe
 	// just compute the lines from offsets in here.
 	setContent := false
@@ -177,7 +198,11 @@ func (a *annotator) printFunctionSource(fn *gocov.Function) error {
 	lineno := file.Line(file.Pos(fn.Start))
 	lines := strings.Split(string(data)[fn.Start:fn.End], "\n")
 	linenoWidth := int(math.Log10(float64(lineno+len(lines)))) + 1
-	fmt.Println()
+	if html {
+		printHeader(w, "Gocov coverage for " + fn.Name)
+		fmt.Fprintln(w, "<PRE>")
+	}
+	fmt.Fprintln(w)
 	for i, line := range lines {
 		// Go through statements one at a time, seeing if we've hit
 		// them or not.
@@ -204,9 +229,22 @@ func (a *annotator) printFunctionSource(fn *gocov.Function) error {
 		if statementFound && !hit {
 			hitmiss = missPrefix
 		}
-		fmt.Printf("%*d %s\t%s\n", linenoWidth, lineno, hitmiss, line)
+		if html {
+			fmt.Fprint(w, "<SPAN class=\"")
+			if statementFound && !hit {
+				fmt.Fprint(w, htmlMissClass)
+			} else {
+				fmt.Fprint(w, htmlHitClass)
+			}
+			fmt.Fprintf(w, "\">%*d\t%s\n</SPAN>", linenoWidth, lineno, line)
+		} else {
+			fmt.Fprintf(w, "%*d %s\t%s\n", linenoWidth, lineno, hitmiss, line)
+		}
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
+	if html {
+		fmt.Fprintln(w, "</PRE>" + htmlFooter)
+	}
 
 	return nil
 }

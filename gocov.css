@@ -1,0 +1,54 @@
+body {
+        margin: 0;
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 16px;
+}
+pre,
+code {
+        font-family: Menlo, monospace;
+        font-size: 14px;
+	color: "black";
+}
+pre {
+        line-height: 18px;
+}
+pre .hit {
+        background: #BCFAB9;
+}
+pre .miss {
+        background: #EDB9CE;
+}
+h1 {
+        font-size: 24px;
+}
+h2 {
+        font-size: 22px;
+        background: #E0EBF5;
+        padding: 2px 5px;
+}
+h3 {
+        font-size: 20px;
+}
+h3,
+h4 {
+        margin: 20px 5px;
+}
+h4 {
+        font-size: 16px;
+}
+table {
+	width: auto;
+}
+.total {
+	font-size: 18px;
+	font-weight: bold;
+}
+.function {
+	padding: 0px 25px;
+}
+.percentage {
+	width: auto;
+}
+.lines {
+	width: auto;
+}
