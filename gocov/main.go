@@ -402,7 +402,7 @@ func instrumentAndTest() (rc int) {
 		workingdir:   cwd}
 	err, packageName = in.abspkgpath(packageName)
 	if err != nil {
-		errorf("failed to resolve package path(%s): %s\n", err)
+		errorf("failed to resolve package path(%s): %s\n", packageName, err)
 		return 1
 	}
 	err = in.instrumentPackage(packageName, true)
