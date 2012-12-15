@@ -1,7 +1,7 @@
 gocov
 -----
 
-Coverage testing tool for The Go Programming Language (work-in-progress)
+Coverage testing tool for The Go Programming Language
 
 Installation
 ============
@@ -42,3 +42,9 @@ to view a summary of the test coverage, for example: -
 Running `gocov annotate <coverage.json> <package[.receiver].function>`
 will generate a source listing of the specified function, annotating
 it with coverage information, such as which lines have been missed.
+
+Related tools
+=============
+
+[GoCovGUI](http://github.com/nsf/gocovgui/):
+A simple GUI wrapper for the gocov coverage analysis tool.
