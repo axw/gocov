@@ -182,7 +182,7 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 	pkgCreated := false
 	if pkgObj == nil {
 		pkgCreated = true
-		pkgObj = gocov.RegisterPackage(f.Name.Name) // FIXME(axw) use full package path
+		pkgObj = gocov.RegisterPackage(pkgpath)
 		in.instrumented[pkgpath] = pkgObj
 	}
 	state := &state{fset, f, pkgObj, nil}
@@ -204,8 +204,7 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 	var vardecls []ast.Decl
 	pkgvarname := fmt.Sprint(pkgObj)
 	if pkgCreated {
-		// FIXME(axw) use full package path
-		value := makeCall("gocov.RegisterPackage", makeLit(f.Name.Name))
+		value := makeCall("gocov.RegisterPackage", makeLit(pkgpath))
 		vardecls = append(vardecls, makeVarDecl(pkgvarname, value))
 	}
 	for _, fn := range state.functions {

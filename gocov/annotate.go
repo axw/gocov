@@ -28,6 +28,7 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -71,10 +72,10 @@ type annotator struct {
 
 func annotateSource() (rc int) {
 	if flag.NArg() == 1 {
-		fmt.Fprintf(os.Stderr, "missing coverage file and functions\n")
+		fmt.Fprintf(os.Stderr, "missing coverage file and function patterns\n")
 		return 1
 	} else if flag.NArg() < 3 {
-		fmt.Fprintf(os.Stderr, "missing functions\n")
+		fmt.Fprintf(os.Stderr, "missing function patterns\n")
 		return 1
 	}
 
@@ -106,45 +107,31 @@ func annotateSource() (rc int) {
 	a := &annotator{}
 	a.fset = token.NewFileSet()
 	a.files = make(map[string]*token.File)
+
+	var regexps []*regexp.Regexp
 	for i := 2; i < flag.NArg(); i++ {
-		funcName := flag.Arg(i)
-		dotIndex := strings.Index(funcName, ".")
-		if dotIndex == -1 {
-			// TODO maybe check if there's just one matching package?
-			fmt.Fprintf(os.Stderr, "warning: unqualified function '%s', skipping\n", funcName)
-			continue
-		}
-
-		pkgName := funcName[:dotIndex]
-		funcName = funcName[dotIndex+1:]
-		i := sort.Search(len(packages), func(i int) bool {
-			return packages[i].Name >= pkgName
-		})
-		if i < len(packages) && packages[i].Name == pkgName {
-			pkg := packages[i]
-			i := sort.Search(len(pkg.Functions), func(i int) bool {
-				return pkg.Functions[i].Name >= funcName
-			})
-			if i < len(pkg.Functions) && pkg.Functions[i].Name == funcName {
-				fn := pkg.Functions[i]
-				err := a.printFunctionSource(fn)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: failed to annotate function '%s.%s'\n",
-						pkgName, funcName)
-				}
-			} else {
-				fmt.Fprintf(os.Stderr,
-					"warning: no coverage data for function '%s.%s', skipping\n",
-					pkgName, funcName)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr,
-				"warning: no coverage data for package '%s', skipping\n", pkgName)
-		}
-
+		arg := flag.Arg(i)
+		re, err := regexp.Compile(arg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "annotation failed for '%s': %s\n", funcName, err)
-			return 1
+			fmt.Fprintf(os.Stderr, "warning: failed to compile %q as a regular expression, ignoring\n", arg)
+		} else {
+			regexps = append(regexps, re)
+		}
+	}
+	if len(regexps) > 0 {
+		for _, pkg := range packages {
+			for _, fn := range pkg.Functions {
+				name := pkg.Name + "/" + fn.Name
+				for _, regexp := range regexps {
+					if regexp.FindStringIndex(name) != nil {
+						err := a.printFunctionSource(fn)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "warning: failed to annotate function %q\n", name)
+						}
+						break
+					}
+				}
+			}
 		}
 	}
 	return
