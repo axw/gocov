@@ -83,10 +83,10 @@ func newReport() (r *report) {
 // AddPackage adds a package's coverage information to the report.
 func (r *report) addPackage(p *gocov.Package) {
 	i := sort.Search(len(r.packages), func(i int) bool {
-		return r.packages[i].Name >= r.packages[i].Name
+		return r.packages[i].Name >= p.Name
 	})
 	if i < len(r.packages) && r.packages[i].Name == p.Name {
-		panic("package already exists: result merging not implemented yet")
+		r.packages[i].Accumulate(p)
 	} else {
 		head := r.packages[:i]
 		tail := append([]*gocov.Package{p}, r.packages[i:]...)
@@ -138,12 +138,14 @@ func printPackage(w io.Writer, pkg *gocov.Package) {
 func reportCoverage() (rc int) {
 	files := make([]*os.File, 0, 1)
 	if flag.NArg() > 1 {
-		name := flag.Arg(1)
-		file, err := os.Open(name)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to open file (%s): %s\n", name, err)
+		for _, name := range flag.Args()[1:] {
+			file, err := os.Open(name)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to open file (%s): %s\n", name, err)
+			} else {
+				files = append(files, file)
+			}
 		}
-		files = append(files, file)
 	} else {
 		files = append(files, os.Stdin)
 	}

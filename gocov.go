@@ -36,7 +36,6 @@ type Object interface {
 }
 
 type ObjectList []Object
-
 type object struct {
 	uid     int
 	context *Context
@@ -174,6 +173,28 @@ func (c *Context) RegisterPackage(name string) *Package {
 	return p
 }
 
+// Accumulate will accumulate the coverage information from the provided
+// Package into this Package.
+func (p *Package) Accumulate(p2 *Package) error {
+	if p.Name != p2.Name {
+		name1 := p.Name
+		name2 := p2.Name
+		return fmt.Errorf("Names do not match: %q != %q", name1, name2)
+	}
+	if len(p.Functions) != len(p2.Functions) {
+		n1 := len(p.Functions)
+		n2 := len(p2.Functions)
+		return fmt.Errorf("Function counts do not match: %d != %d", n1, n2)
+	}
+	for i, f := range p.Functions {
+		err := f.Accumulate(p2.Functions[i])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RegisterFunction registers a function for coverage.
 func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int) *Function {
 	c := p.context
@@ -190,6 +211,40 @@ func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int
 	c.logf("%s.RegisterFunction(%#q, %#q, %d, %d): %s\n",
 		p, name, file, startOffset, endOffset, f)
 	return f
+}
+
+// Accumulate will accumulate the coverage information from the provided
+// Function into this Function.
+func (f *Function) Accumulate(f2 *Function) error {
+	if f.Name != f2.Name {
+		name1 := f.Name
+		name2 := f2.Name
+		return fmt.Errorf("Names do not match: %q != %q", name1, name2)
+	}
+	if f.File != f2.File {
+		file1 := f.File
+		file2 := f2.File
+		return fmt.Errorf("Files do not match: %q != %q", file1, file2)
+	}
+	if f.Start != f2.Start || f.End != f2.End {
+		range1 := fmt.Sprintf("%d-%d", f.Start, f.End)
+		range2 := fmt.Sprintf("%d-%d", f2.Start, f2.End)
+		return fmt.Errorf("Source ranges do not match: %s != %s", range1, range2)
+	}
+	if len(f.Statements) != len(f2.Statements) {
+		n1 := len(f.Statements)
+		n2 := len(f2.Statements)
+		return fmt.Errorf("Number of statements do not match: %d != %d", n1, n2)
+	}
+	f.Entered += f2.Entered
+	f.Left += f2.Left
+	for i, s := range f.Statements {
+		err := s.Accumulate(f2.Statements[i])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Leave informs gocov that the function has been entered.
@@ -214,6 +269,18 @@ func (f *Function) RegisterStatement(startOffset, endOffset int) *Statement {
 	c.Objects = append(c.Objects, s)
 	c.logf("%s.RegisterStatement(%d, %d): %s\n", f, startOffset, endOffset, s)
 	return s
+}
+
+// Accumulate will accumulate the coverage information from the provided
+// Statement into this Statement.
+func (s *Statement) Accumulate(s2 *Statement) error {
+	if s.Start != s2.Start || s.End != s2.End {
+		range1 := fmt.Sprintf("%d-%d", s.Start, s.End)
+		range2 := fmt.Sprintf("%d-%d", s2.Start, s2.End)
+		return fmt.Errorf("Source ranges do not match: %s != %s", range1, range2)
+	}
+	s.Reached += s2.Reached
+	return nil
 }
 
 // At informs gocov that the statement has been reached.
