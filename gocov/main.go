@@ -25,9 +25,10 @@ import (
 	"flag"
 	"fmt"
 	"github.com/axw/gocov"
+	"github.com/axw/gocov/parser"
 	"go/ast"
 	"go/build"
-	"go/parser"
+	goparser "go/parser"
 	"go/printer"
 	"go/token"
 	"io"
@@ -112,8 +113,8 @@ func (in *instrumenter) parsePackage(path string, fset *token.FileSet) (*build.P
 		i := sort.SearchStrings(goFiles, name)
 		return i < len(goFiles) && goFiles[i] == name
 	}
-	mode := parser.DeclarationErrors | parser.ParseComments
-	pkgs, err := parser.ParseDir(fset, p.Dir, filter, mode)
+	mode := goparser.DeclarationErrors | goparser.ParseComments
+	pkgs, err := goparser.ParseDir(fset, p.Dir, filter, mode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -279,8 +280,8 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 		testGoFiles = append(testGoFiles, buildpkg.XTestGoFiles...)
 		for _, filename := range testGoFiles {
 			path := filepath.Join(buildpkg.Dir, filename)
-			mode := parser.DeclarationErrors | parser.ParseComments
-			file, err := parser.ParseFile(fset, path, nil, mode)
+			mode := goparser.DeclarationErrors | goparser.ParseComments
+			file, err := goparser.ParseFile(fset, path, nil, mode)
 			if err != nil {
 				return err
 			}
@@ -449,7 +450,7 @@ func instrumentAndTest() (rc int) {
 		rc = 1
 	}
 
-	packages, err := gocov.ParseTrace(outfilePath)
+	packages, err := parser.ParseTrace(outfilePath)
 	if err != nil {
 		errorf("failed to parse gocov output: %s\n", err)
 		rc = 1
