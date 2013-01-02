@@ -247,7 +247,7 @@ func (f *Function) Accumulate(f2 *Function) error {
 	return nil
 }
 
-// Leave informs gocov that the function has been entered.
+// Enter informs gocov that the function has been entered.
 func (f *Function) Enter() {
 	if atomic.AddInt64(&f.Entered, 1) == 1 || f.context.traceAll() {
 		f.context.logf("%s.Enter()\n", f)
