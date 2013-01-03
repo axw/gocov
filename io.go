@@ -33,8 +33,7 @@ func (w fdwriter) Write(p []byte) (n int, err error) {
 	return syscall.Write(int(w), p)
 }
 
-func write(w Writer, s string) error {
-	buf := []byte(s)
+func write(w Writer, buf []byte) error {
 	for len(buf) > 0 {
 		n, err := w.Write(buf)
 		if err != nil {

@@ -80,6 +80,12 @@ type Function struct {
 
 	// number of times the function has been left.
 	Left int64
+
+	// preallocated strings for logging in (*Statement).{Enter,Leave}()
+	//
+	// These are preallocated so as to avoid introducing heap allocations into
+	// instrumented code.
+	enterString, leaveString []byte
 }
 
 type Statement struct {
@@ -93,6 +99,12 @@ type Statement struct {
 
 	// Reached is the number of times the statement was reached.
 	Reached int64
+
+	// preallocated string for logging in (*Statement).At()
+	//
+	// These are preallocated so as to avoid introducing heap allocations into
+	// instrumented code.
+	atString []byte
 }
 
 // Flags that affect how results are traced, if a
@@ -139,7 +151,7 @@ func init() {
 		if err != nil {
 			msg := "gocov: failed to create log file: "
 			msg += err.Error() + "\n"
-			write(fdwriter(syscall.Stderr), msg)
+			write(fdwriter(syscall.Stderr), []byte(msg))
 			syscall.Exit(1)
 		}
 		Default.Tracer = fdwriter(int(fd))
@@ -149,10 +161,10 @@ func init() {
 	syscall.Setenv("GOCOVOUT", "")
 }
 
-func (c *Context) log(str string) {
+func (c *Context) log(bytes []byte) {
 	if c.Tracer != nil {
 		c.Lock()
-		write(c.Tracer, str+"\n")
+		write(c.Tracer, bytes)
 		c.Unlock()
 	}
 }
@@ -174,7 +186,7 @@ func (c *Context) RegisterPackage(name string) *Package {
 	p := &Package{object: c.allocObject(), Name: name}
 	c.Objects = append(c.Objects, p)
 	msg := `RegisterPackage("` + name + `"): ` + p.String()
-	c.log(msg)
+	c.log([]byte(msg + "\n"))
 	return p
 }
 
@@ -207,11 +219,13 @@ func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int
 	c := p.context
 	obj := c.allocObject()
 	f := &Function{
-		object: obj,
-		Name:   name,
-		File:   file,
-		Start:  startOffset,
-		End:    endOffset,
+		object:      obj,
+		Name:        name,
+		File:        file,
+		Start:       startOffset,
+		End:         endOffset,
+		enterString: []byte(obj.String() + ".Enter()\n"),
+		leaveString: []byte(obj.String() + ".Leave()\n"),
 	}
 	p.Functions = append(p.Functions, f)
 	c.Objects = append(c.Objects, f)
@@ -219,7 +233,7 @@ func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int
 	msg += `"` + name + `", "` + file + `", `
 	msg += itoa(startOffset) + ", " + itoa(endOffset)
 	msg += "): " + f.String()
-	c.log(msg)
+	c.log([]byte(msg + "\n"))
 	return f
 }
 
@@ -264,27 +278,33 @@ func (f *Function) Accumulate(f2 *Function) error {
 // Enter informs gocov that the function has been entered.
 func (f *Function) Enter() {
 	if atomic.AddInt64(&f.Entered, 1) == 1 || f.context.traceAll() {
-		f.context.log(f.String() + ".Enter()")
+		f.context.log(f.enterString)
 	}
 }
 
 // Leave informs gocov that the function has been left.
 func (f *Function) Leave() {
 	if atomic.AddInt64(&f.Left, 1) == 1 || f.context.traceAll() {
-		f.context.log(f.String() + ".Leave()")
+		f.context.log(f.leaveString)
 	}
 }
 
 // RegisterStatement registers a statement for coverage.
 func (f *Function) RegisterStatement(startOffset, endOffset int) *Statement {
 	c := f.context
-	s := &Statement{object: c.allocObject(), Start: startOffset, End: endOffset}
+	obj := c.allocObject()
+	s := &Statement{
+		object:   obj,
+		Start:    startOffset,
+		End:      endOffset,
+		atString: []byte(obj.String() + ".At()\n"),
+	}
 	f.Statements = append(f.Statements, s)
 	c.Objects = append(c.Objects, s)
 	msg := f.String() + ".RegisterStatement("
 	msg += itoa(startOffset) + ", " + itoa(endOffset)
 	msg += "): " + s.String()
-	c.log(msg)
+	c.log([]byte(msg + "\n"))
 	return s
 }
 
@@ -304,6 +324,6 @@ func (s *Statement) Accumulate(s2 *Statement) error {
 // At informs gocov that the statement has been reached.
 func (s *Statement) At() {
 	if atomic.AddInt64(&s.Reached, 1) == 1 || s.context.traceAll() {
-		s.context.log(s.String() + ".At()")
+		s.context.log(s.atString)
 	}
 }
