@@ -66,6 +66,10 @@ var (
 		"work", false,
 		"print the name of the temporary work directory "+
 			"and do not delete it when exiting")
+	testRunFlag = testFlags.String(
+		"run", "",
+		"Run only those tests and examples matching the regular "+
+			"expression.")
 	verbose bool
 )
 
@@ -417,6 +421,9 @@ func instrumentAndTest() (rc int) {
 	args := []string{"test"}
 	if verbose {
 		args = append(args, "-v")
+	}
+	if *testRunFlag != "" {
+		args = append(args, "-run", *testRunFlag)
 	}
 	instrumentedPackageName := packageName
 	if packageName == gocovPackagePath {
