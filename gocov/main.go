@@ -229,7 +229,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 	if err != nil {
 		return err
 	}
-	if buildpkg.Goroot && *testExcludeGorootFlag {
+	if !testPackage && (buildpkg.Goroot && *testExcludeGorootFlag) {
 		verbosef("skipping GOROOT package %q\n", pkgpath)
 		return nil
 	}
