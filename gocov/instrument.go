@@ -171,7 +171,7 @@ func (in *instrumenter) redirectImports(f *ast.File) {
 	for _, importSpec := range f.Imports {
 		path, _ := strconv.Unquote(importSpec.Path.Value)
 		if _, ok := in.instrumented[path]; ok {
-			path = instrumentedPathPrefix + "/" + path
+			path = instrumentedPackagePath(path)
 			importSpec.Path.Value = strconv.Quote(path)
 		}
 	}

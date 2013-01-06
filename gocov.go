@@ -1,15 +1,15 @@
 // Copyright (c) 2012 The Gocov Authors.
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal in the Software without restriction, including without limitation the
 // rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
 // sell copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,13 +21,12 @@
 // Package gocov is a code coverage analysis tool for Go.
 package gocov
 
+// NOTE: Any package dependencies of gocov cannot be coverage tested, as they
+// must import gocov itself. Do not add dependencies without consideration.
 import (
-	"fmt"
-	"io"
-	"log"
-	"os"
 	"sync"
 	"sync/atomic"
+	"syscall"
 )
 
 // Object is an interface implemented by all coverage objects.
@@ -46,7 +45,7 @@ func (o *object) Uid() int {
 }
 
 func (o *object) String() string {
-	return fmt.Sprint("gocovObject", o.uid)
+	return "gocovObject" + itoa(o.uid)
 }
 
 type Package struct {
@@ -83,6 +82,12 @@ type Function struct {
 
 	// number of times the function has been left.
 	Left int64
+
+	// preallocated strings for logging in (*Statement).{Enter,Leave}()
+	//
+	// These are preallocated so as to avoid introducing heap allocations into
+	// instrumented code.
+	enterString, leaveString []byte
 }
 
 type Statement struct {
@@ -96,9 +101,15 @@ type Statement struct {
 
 	// Reached is the number of times the statement was reached.
 	Reached int64
+
+	// preallocated string for logging in (*Statement).At()
+	//
+	// These are preallocated so as to avoid introducing heap allocations into
+	// instrumented code.
+	atString []byte
 }
 
-// Flags that affect how results are traced, if a 
+// Flags that affect how results are traced, if a
 type TraceFlag int
 
 const (
@@ -117,7 +128,7 @@ type Context struct {
 	Objects ObjectList
 
 	// Tracer is used for tracing coverage. If nil, no tracing will occur.
-	Tracer io.Writer
+	Tracer Writer
 
 	// TraceFlags alters how coverage is traced.
 	TraceFlags TraceFlag
@@ -131,24 +142,32 @@ func (c *Context) traceAll() bool {
 var Default = &Context{}
 
 func init() {
-	switch v := os.Getenv("GOCOVOUT"); v {
+	switch path, _ := syscall.Getenv("GOCOVOUT"); path {
 	case "":
+		// No tracing
 	case "-":
-		Default.Tracer = os.Stdout
+		Default.Tracer = fdwriter(syscall.Stdout)
 	default:
-		var err error
-		writer, err := os.Create(v)
+		mode := syscall.O_WRONLY | syscall.O_CREAT | syscall.O_TRUNC
+		fd, err := syscall.Open(path, mode, 0666)
 		if err != nil {
-			log.Fatalf("gocov: failed to create log file: %s\n", err)
+			msg := "gocov: failed to create log file: "
+			msg += err.Error() + "\n"
+			write(fdwriter(syscall.Stderr), []byte(msg))
+			syscall.Exit(1)
 		}
-		Default.Tracer = writer
+		Default.Tracer = fdwriter(int(fd))
 	}
+
+	// Remove GOCOVOUT from environ, to prevent noise from child processes.
+	// TODO Don't do this; append .pid to output filename.
+	syscall.Setenv("GOCOVOUT", "")
 }
 
-func (c *Context) logf(format string, args ...interface{}) {
+func (c *Context) log(bytes []byte) {
 	if c.Tracer != nil {
 		c.Lock()
-		fmt.Fprintf(c.Tracer, format, args...)
+		write(c.Tracer, bytes)
 		c.Unlock()
 	}
 }
@@ -169,7 +188,8 @@ func RegisterPackage(name string) *Package {
 func (c *Context) RegisterPackage(name string) *Package {
 	p := &Package{object: c.allocObject(), Name: name}
 	c.Objects = append(c.Objects, p)
-	c.logf("RegisterPackage(%#q): %s\n", name, p)
+	msg := `RegisterPackage("` + name + `"): ` + p.String()
+	c.log([]byte(msg + "\n"))
 	return p
 }
 
@@ -177,14 +197,16 @@ func (c *Context) RegisterPackage(name string) *Package {
 // Package into this Package.
 func (p *Package) Accumulate(p2 *Package) error {
 	if p.Name != p2.Name {
-		name1 := p.Name
-		name2 := p2.Name
-		return fmt.Errorf("Names do not match: %q != %q", name1, name2)
+		name1 := `"` + p.Name + `"`
+		name2 := `"` + p2.Name + `"`
+		msg := "Names do not match: " + name1 + " != " + name2
+		return strerror(msg)
 	}
 	if len(p.Functions) != len(p2.Functions) {
-		n1 := len(p.Functions)
-		n2 := len(p2.Functions)
-		return fmt.Errorf("Function counts do not match: %d != %d", n1, n2)
+		n1 := itoa(len(p.Functions))
+		n2 := itoa(len(p2.Functions))
+		msg := "Function counts do not match: " + n1 + " != " + n2
+		return strerror(msg)
 	}
 	for i, f := range p.Functions {
 		err := f.Accumulate(p2.Functions[i])
@@ -200,16 +222,21 @@ func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int
 	c := p.context
 	obj := c.allocObject()
 	f := &Function{
-		object: obj,
-		Name:   name,
-		File:   file,
-		Start:  startOffset,
-		End:    endOffset,
+		object:      obj,
+		Name:        name,
+		File:        file,
+		Start:       startOffset,
+		End:         endOffset,
+		enterString: []byte(obj.String() + ".Enter()\n"),
+		leaveString: []byte(obj.String() + ".Leave()\n"),
 	}
 	p.Functions = append(p.Functions, f)
 	c.Objects = append(c.Objects, f)
-	c.logf("%s.RegisterFunction(%#q, %#q, %d, %d): %s\n",
-		p, name, file, startOffset, endOffset, f)
+	msg := p.String() + ".RegisterFunction("
+	msg += `"` + name + `", "` + file + `", `
+	msg += itoa(startOffset) + ", " + itoa(endOffset)
+	msg += "): " + f.String()
+	c.log([]byte(msg + "\n"))
 	return f
 }
 
@@ -217,24 +244,28 @@ func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int
 // Function into this Function.
 func (f *Function) Accumulate(f2 *Function) error {
 	if f.Name != f2.Name {
-		name1 := f.Name
-		name2 := f2.Name
-		return fmt.Errorf("Names do not match: %q != %q", name1, name2)
+		name1 := `"` + f.Name + `"`
+		name2 := `"` + f2.Name + `"`
+		msg := "Names do not match: " + name1 + " != " + name2
+		return strerror(msg)
 	}
 	if f.File != f2.File {
-		file1 := f.File
-		file2 := f2.File
-		return fmt.Errorf("Files do not match: %q != %q", file1, file2)
+		file1 := `"` + f.File + `"`
+		file2 := `"` + f2.File + `"`
+		msg := "Files do not match: " + file1 + " != " + file2
+		return strerror(msg)
 	}
 	if f.Start != f2.Start || f.End != f2.End {
-		range1 := fmt.Sprintf("%d-%d", f.Start, f.End)
-		range2 := fmt.Sprintf("%d-%d", f2.Start, f2.End)
-		return fmt.Errorf("Source ranges do not match: %s != %s", range1, range2)
+		r1 := itoa(f.Start) + "-" + itoa(f.End)
+		r2 := itoa(f2.Start) + "-" + itoa(f2.End)
+		msg := "Source ranges do not match: " + r1 + " != " + r2
+		return strerror(msg)
 	}
 	if len(f.Statements) != len(f2.Statements) {
-		n1 := len(f.Statements)
-		n2 := len(f2.Statements)
-		return fmt.Errorf("Number of statements do not match: %d != %d", n1, n2)
+		n1 := itoa(len(f.Statements))
+		n2 := itoa(len(f2.Statements))
+		msg := "Number of statements do not match: " + n1 + " != " + n2
+		return strerror(msg)
 	}
 	f.Entered += f2.Entered
 	f.Left += f2.Left
@@ -247,27 +278,36 @@ func (f *Function) Accumulate(f2 *Function) error {
 	return nil
 }
 
-// Leave informs gocov that the function has been entered.
+// Enter informs gocov that the function has been entered.
 func (f *Function) Enter() {
 	if atomic.AddInt64(&f.Entered, 1) == 1 || f.context.traceAll() {
-		f.context.logf("%s.Enter()\n", f)
+		f.context.log(f.enterString)
 	}
 }
 
 // Leave informs gocov that the function has been left.
 func (f *Function) Leave() {
 	if atomic.AddInt64(&f.Left, 1) == 1 || f.context.traceAll() {
-		f.context.logf("%s.Leave()\n", f)
+		f.context.log(f.leaveString)
 	}
 }
 
 // RegisterStatement registers a statement for coverage.
 func (f *Function) RegisterStatement(startOffset, endOffset int) *Statement {
 	c := f.context
-	s := &Statement{object: c.allocObject(), Start: startOffset, End: endOffset}
+	obj := c.allocObject()
+	s := &Statement{
+		object:   obj,
+		Start:    startOffset,
+		End:      endOffset,
+		atString: []byte(obj.String() + ".At()\n"),
+	}
 	f.Statements = append(f.Statements, s)
 	c.Objects = append(c.Objects, s)
-	c.logf("%s.RegisterStatement(%d, %d): %s\n", f, startOffset, endOffset, s)
+	msg := f.String() + ".RegisterStatement("
+	msg += itoa(startOffset) + ", " + itoa(endOffset)
+	msg += "): " + s.String()
+	c.log([]byte(msg + "\n"))
 	return s
 }
 
@@ -275,9 +315,10 @@ func (f *Function) RegisterStatement(startOffset, endOffset int) *Statement {
 // Statement into this Statement.
 func (s *Statement) Accumulate(s2 *Statement) error {
 	if s.Start != s2.Start || s.End != s2.End {
-		range1 := fmt.Sprintf("%d-%d", s.Start, s.End)
-		range2 := fmt.Sprintf("%d-%d", s2.Start, s2.End)
-		return fmt.Errorf("Source ranges do not match: %s != %s", range1, range2)
+		r1 := itoa(s.Start) + "-" + itoa(s.End)
+		r2 := itoa(s2.Start) + "-" + itoa(s2.End)
+		msg := "Source ranges do not match: " + r1 + " != " + r2
+		return strerror(msg)
 	}
 	s.Reached += s2.Reached
 	return nil
@@ -286,6 +327,6 @@ func (s *Statement) Accumulate(s2 *Statement) error {
 // At informs gocov that the statement has been reached.
 func (s *Statement) At() {
 	if atomic.AddInt64(&s.Reached, 1) == 1 || s.context.traceAll() {
-		s.context.logf("%s.At()\n", s)
+		s.context.log(s.atString)
 	}
 }
