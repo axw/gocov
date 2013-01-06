@@ -42,6 +42,7 @@ import (
 )
 
 const gocovPackagePath = "github.com/axw/gocov"
+const instrumentedGocovPackagePath = "github.com/axw/gocov/instrumented"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n\n\tgocov command [arguments]\n\n")
@@ -189,6 +190,16 @@ func (in *instrumenter) abspkgpath(pkgpath string) (error, string) {
 	return nil, p.ImportPath
 }
 
+func instrumentedPackagePath(pkgpath string) string {
+	// All instrumented packages import gocov. If we want to
+	// instrumented gocov itself, we must change its name so
+	// it can import (the uninstrumented version of) itself.
+	if pkgpath == gocovPackagePath {
+		return instrumentedGocovPackagePath
+	}
+	return pkgpath
+}
+
 func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) error {
 	if _, already := in.processed[pkgpath]; already {
 		return nil
@@ -274,10 +285,8 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 	// Clone the directory structure, symlinking files (if possible),
 	// otherwise copying the files. Instrumented files will replace
 	// the symlinks with new files.
-	cloneDir := filepath.Join(in.gopath, "src", "pkg", pkgpath)
-	if pkgpath == gocovPackagePath {
-		cloneDir += "/instrumented"
-	}
+	ipkgpath := instrumentedPackagePath(pkgpath)
+	cloneDir := filepath.Join(in.gopath, "src", "pkg", ipkgpath)
 	err = symlinkHierarchy(buildpkg.Dir, cloneDir)
 	if err != nil {
 		return err
@@ -425,10 +434,7 @@ func instrumentAndTest() (rc int) {
 	if *testRunFlag != "" {
 		args = append(args, "-run", *testRunFlag)
 	}
-	instrumentedPackageName := packageName
-	if packageName == gocovPackagePath {
-		instrumentedPackageName += "/instrumented"
-	}
+	instrumentedPackageName := instrumentedPackagePath(packageName)
 	args = append(args, instrumentedPackageName)
 	cmd := exec.Command("go", args...)
 	cmd.Env = env

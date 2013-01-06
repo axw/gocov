@@ -20,9 +20,10 @@
 
 package gocov
 
+// strerror implements the error interface, and exists purely to avoid a
+// dependency on the standard errors/fmt packages.
 type strerror string
 
 func (s strerror) Error() string {
 	return string(s)
 }
-

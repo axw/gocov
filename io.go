@@ -20,9 +20,11 @@
 
 package gocov
 
+// NOTE: Any package dependencies of gocov cannot be coverage tested, as they
+// must import gocov itself. Do not add dependencies without consideration.
 import "syscall"
 
-// clone of io.Writer
+// Writer is a clone of io.Writer, to avoid the unnecessary package dependency.
 type Writer interface {
 	Write(p []byte) (n int, err error)
 }

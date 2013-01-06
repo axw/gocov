@@ -21,6 +21,8 @@
 // Package gocov is a code coverage analysis tool for Go.
 package gocov
 
+// NOTE: Any package dependencies of gocov cannot be coverage tested, as they
+// must import gocov itself. Do not add dependencies without consideration.
 import (
 	"sync"
 	"sync/atomic"
@@ -158,6 +160,7 @@ func init() {
 	}
 
 	// Remove GOCOVOUT from environ, to prevent noise from child processes.
+	// TODO Don't do this; append .pid to output filename.
 	syscall.Setenv("GOCOVOUT", "")
 }
 
