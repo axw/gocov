@@ -18,21 +18,16 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 
+// +build !windows
+
 package gocov
 
-// Writer is a clone of io.Writer, to avoid the unnecessary package dependency.
-type Writer interface {
-	Write(p []byte) (n int, err error)
-}
+// NOTE: Any package dependencies of gocov cannot be coverage tested, as they
+// must import gocov itself. Do not add dependencies without consideration.
+import "syscall"
 
-func write(w Writer, buf []byte) error {
-	for len(buf) > 0 {
-		n, err := w.Write(buf)
-		if err != nil {
-			return err
-		}
-		buf = buf[n:]
-	}
-	return nil
-}
+type fdwriter int
 
+func (w fdwriter) Write(p []byte) (n int, err error) {
+	return syscall.Write(int(w), p)
+}
