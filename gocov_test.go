@@ -89,11 +89,11 @@ func TestTraceOutput(t *testing.T) {
 	}
 
 	p := ctx.RegisterPackage("p1")
-	check(`RegisterPackage("p1"): gocovObject0`)
+	check("RegisterPackage(`p1`): gocovObject0")
 	buf.Reset()
 
 	f := p.RegisterFunction("f1", "file.go", 0, 1)
-	check(`gocovObject0.RegisterFunction("f1", "file.go", 0, 1): gocovObject1`)
+	check("gocovObject0.RegisterFunction(`f1`, `file.go`, 0, 1): gocovObject1")
 	buf.Reset()
 
 	s := f.RegisterStatement(0, 1)

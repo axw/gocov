@@ -188,7 +188,7 @@ func RegisterPackage(name string) *Package {
 func (c *Context) RegisterPackage(name string) *Package {
 	p := &Package{object: c.allocObject(), Name: name}
 	c.Objects = append(c.Objects, p)
-	msg := `RegisterPackage("` + name + `"): ` + p.String()
+	msg := `RegisterPackage(` + quote(name) + `): ` + p.String()
 	c.log([]byte(msg + "\n"))
 	return p
 }
@@ -197,8 +197,8 @@ func (c *Context) RegisterPackage(name string) *Package {
 // Package into this Package.
 func (p *Package) Accumulate(p2 *Package) error {
 	if p.Name != p2.Name {
-		name1 := `"` + p.Name + `"`
-		name2 := `"` + p2.Name + `"`
+		name1 := quote(p.Name)
+		name2 := quote(p2.Name)
 		msg := "Names do not match: " + name1 + " != " + name2
 		return strerror(msg)
 	}
@@ -233,7 +233,7 @@ func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int
 	p.Functions = append(p.Functions, f)
 	c.Objects = append(c.Objects, f)
 	msg := p.String() + ".RegisterFunction("
-	msg += `"` + name + `", "` + file + `", `
+	msg += quote(name) + ", " + quote(file) + ", "
 	msg += itoa(startOffset) + ", " + itoa(endOffset)
 	msg += "): " + f.String()
 	c.log([]byte(msg + "\n"))
@@ -244,14 +244,14 @@ func (p *Package) RegisterFunction(name, file string, startOffset, endOffset int
 // Function into this Function.
 func (f *Function) Accumulate(f2 *Function) error {
 	if f.Name != f2.Name {
-		name1 := `"` + f.Name + `"`
-		name2 := `"` + f2.Name + `"`
+		name1 := quote(f.Name)
+		name2 := quote(f2.Name)
 		msg := "Names do not match: " + name1 + " != " + name2
 		return strerror(msg)
 	}
 	if f.File != f2.File {
-		file1 := `"` + f.File + `"`
-		file2 := `"` + f2.File + `"`
+		file1 := quote(f.File)
+		file2 := quote(f2.File)
 		msg := "Files do not match: " + file1 + " != " + file2
 		return strerror(msg)
 	}
