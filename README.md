@@ -1,31 +1,46 @@
-gocov
------
+# gocov
 
 Coverage testing tool for The Go Programming Language
 
-Installation
-============
+## Installation
 
 ```go get github.com/axw/gocov/gocov```
 
-Usage
-=====
+## Usage
 
 There are currently three gocov commands: ```test```, ```report``` and ```annotate```.
 
-*gocov test*
+#### gocov test
 
 Running `gocov test <package>` will, for the specified package,
 instrument all imported packages not part of the standard library,
 and run "go test". Upon completion, coverage data will be emitted
 in the form of a JSON document.
 
-Packages will be recursively checked for imports, and those
-packages will also be instrumented. If you wish to exclude a
-package from instrumentation, you can specify an optional exclude
-flag, e.g. `gocov test -exclude comma,separated,packages`.
+###### Controlling instrumentation
 
-*gocov report*
+By default only the specified package will be instrumented and
+consequently have coverage information provided for. There are
+several flags that can change this behaviour.
+
+By running `gocov test -deps <package>` you direct gocov to recursively
+instrument package dependencies, in which case coverage information
+will be provided for all dependencies as well. The coverage information
+provided is relative only to the tests run in the originally specified
+package.
+
+e.g. If you run `gocov test -deps net/http`, then you will see
+coverage information not just for `net/http`, but also its dependencies;
+the output tells you what code in the dependencies is exercised when the
+`net/http` tests are run.
+
+If you specify `-deps` but wish to exclude a specific package from
+instrumentation, you can pass an additional `-exclude` flag, e.g.
+`gocov test -deps -exclude comma,separated,packages`. If you wish to
+exclude all packages in GOROOT, then you can use the shortcut
+`-exclude-goroot` flag instead.
+
+#### gocov report
 
 Running `gocov report <coverage.json>` will generate a textual
 report from the coverage data output by `gocov test`. It is
@@ -37,14 +52,13 @@ to view a summary of the test coverage, for example: -
 
     gocov test mypackage | gocov report
 
-*gocov annotate*
+#### gocov annotate
 
 Running `gocov annotate <coverage.json> <package[.receiver].function>`
 will generate a source listing of the specified function, annotating
 it with coverage information, such as which lines have been missed.
 
-Related tools
-=============
+## Related tools
 
 [GoCovGUI](http://github.com/nsf/gocovgui/):
 A simple GUI wrapper for the gocov coverage analysis tool.
