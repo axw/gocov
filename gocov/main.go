@@ -56,12 +56,15 @@ func usage() {
 }
 
 var (
-	testFlags       = flag.NewFlagSet("test", flag.ExitOnError)
+	testFlags    = flag.NewFlagSet("test", flag.ExitOnError)
+	testDepsFlag = testFlags.Bool(
+		"deps", false,
+		"Instrument all package dependencies, including transitive")
 	testExcludeFlag = testFlags.String(
 		"exclude", "",
 		"packages to exclude, separated by comma")
 	testExcludeGorootFlag = testFlags.Bool(
-		"exclude-goroot", true,
+		"exclude-goroot", false,
 		"exclude packages in GOROOT from instrumentation")
 	testWorkFlag = testFlags.Bool(
 		"work", false,
@@ -247,20 +250,22 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 	}(in.workingdir)
 	in.workingdir = buildpkg.Dir
 
-	imports := buildpkg.Imports[:]
-	if testPackage {
-		imports = append(imports, buildpkg.TestImports...)
-		imports = append(imports, buildpkg.XTestImports...)
-	}
-	for _, subpkgpath := range imports {
-		err, subpkgpath = in.abspkgpath(subpkgpath)
-		if err != nil {
-			return err
+	if *testDepsFlag {
+		imports := buildpkg.Imports[:]
+		if testPackage {
+			imports = append(imports, buildpkg.TestImports...)
+			imports = append(imports, buildpkg.XTestImports...)
 		}
-		if _, done := in.instrumented[subpkgpath]; !done {
-			err = in.instrumentPackage(subpkgpath, false)
+		for _, subpkgpath := range imports {
+			err, subpkgpath = in.abspkgpath(subpkgpath)
 			if err != nil {
 				return err
+			}
+			if _, done := in.instrumented[subpkgpath]; !done {
+				err = in.instrumentPackage(subpkgpath, false)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
