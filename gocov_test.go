@@ -22,40 +22,10 @@ package gocov
 
 import (
 	"bytes"
-	"fmt"
 	"runtime"
 	"strings"
 	"testing"
 )
-
-func checkPanic(f func()) (panicked bool) {
-	defer func() {
-		if err := recover(); err != nil {
-			panicked = true
-		}
-	}()
-	f()
-	return panicked
-}
-
-func TestItoa(t *testing.T) {
-	var values = [...]int{
-		0, 1, -1, 10, -10, 100, -100, 1<<63 - 1, -1<<63 + 1,
-		// (-1 << 63) will panic due to a known bug
-	}
-	for _, v := range values {
-		expected := fmt.Sprint(v)
-		actual := itoa(v)
-		if actual != expected {
-			t.Errorf("expected %s, received %s", expected, actual)
-		}
-	}
-
-	// (-1 << 63) will panic due to a known bug
-	if !checkPanic(func() { itoa(-1 << 63) }) {
-		t.Error("Expected itoa(-1 << 63) to panic")
-	}
-}
 
 func TestMallocs(t *testing.T) {
 	ctx := &Context{}
