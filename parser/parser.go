@@ -27,6 +27,7 @@ import (
 	"go/token"
 	"io/ioutil"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -213,6 +214,21 @@ func ParseTrace(path string) (pkgs []*gocov.Package, err error) {
 		context: &gocov.Context{},
 	}
 	p.parse()
-	pkgs = p.packages
+
+	// Merge packages with the same path. This is to cater for "." imports,
+	// which can result in two copies of the same package existing
+	// simultaneously within a program.
+	for _, p := range p.packages {
+		i := sort.Search(len(pkgs), func(i int) bool {
+			return pkgs[i].Name >= p.Name
+		})
+		if i < len(pkgs) && pkgs[i].Name == p.Name {
+			pkgs[i].Accumulate(p)
+		} else {
+			head := pkgs[:i]
+			tail := append([]*gocov.Package{p}, pkgs[i:]...)
+			pkgs = append(head, tail...)
+		}
+	}
 	return
 }
