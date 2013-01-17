@@ -138,6 +138,8 @@ type funcVisitor struct {
 }
 
 func (v *funcVisitor) Visit(n ast.Node) ast.Visitor {
+	var body *ast.BlockStmt
+
 	switch n := n.(type) {
 	case *ast.FuncDecl:
 		// Function name is prepended with "T." if there is a receiver, where
@@ -155,15 +157,41 @@ func (v *funcVisitor) Visit(n ast.Node) ast.Visitor {
 		start, end := v.fset.Position(n.Pos()), v.fset.Position(n.End())
 		f := v.pkg.RegisterFunction(name, start.Filename, start.Offset, end.Offset)
 		v.state.functions = append(v.state.functions, f)
-		sv := &stmtVisitor{v.state}
-		if n.Body != nil {
-			sv.VisitStmt(n.Body)
-		}
-		// TODO function coverage (insert "function.Enter", "function.Leave").
+		body = n.Body
 
-		// TODO come up with naming scheme for function literals.
-		// case *ast.FuncLit:
+	case *ast.FuncLit:
+		// Function literals defined within a function do not get a separate
+		// *gocov.Function, rather their statements are counted in the
+		// enclosing function.
+		//
+		// Function literals at the package scope are named "@<Position>",
+		// where "<Position>" is the position of the beginning of the function
+		// literal.
+		start, end := v.fset.Position(n.Pos()), v.fset.Position(n.End())
+		var enclosing *gocov.Function
+		if len(v.functions) > 0 {
+			lastfunc := v.functions[len(v.functions)-1]
+			if start.Offset < lastfunc.End {
+				enclosing = lastfunc
+			}
+		}
+		if enclosing == nil {
+			name := fmt.Sprintf("@%d:%d", start.Line, start.Column)
+			f := v.pkg.RegisterFunction(name, start.Filename, start.Offset, end.Offset)
+			v.state.functions = append(v.state.functions, f)
+		}
+		body = n.Body
 	}
+
+	if body != nil {
+		// TODO function coverage (insert "function.Enter", "function.Leave").
+		//
+		// FIXME instrumentation no longer records statements in line order,
+		// as function literals are processed after the body of a function.
+		sv := &stmtVisitor{v.state}
+		sv.VisitStmt(body)
+	}
+
 	return v
 }
 
@@ -186,7 +214,7 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 		in.instrumented[pkgpath] = pkgObj
 	}
 	state := &state{fset, f, pkgObj, nil}
-	ast.Walk(&funcVisitor{state}, f)
+	ast.Walk(&funcVisitor{state: state}, f)
 
 	// Count the number of import GenDecl's. They're always first.
 	nImportDecls := 0

@@ -177,14 +177,17 @@ func (a *annotator) printFunctionSource(fn *gocov.Function) error {
 		hit := false
 		for j := 0; j < len(statements); j++ {
 			start := file.Line(file.Pos(statements[j].Start))
+			// FIXME instrumentation no longer records statements
+			// in line order, as function literals are processed
+			// after the body of a function. If/when that's changed,
+			// we can go back to checking just the first statement
+			// in each loop.
 			if start == lineno {
 				statementFound = true
 				if !hit && statements[j].Reached > 0 {
 					hit = true
 				}
-				statements = statements[1:]
-			} else {
-				break
+				statements = append(statements[:j], statements[j+1:]...)
 			}
 		}
 		hitmiss := hitPrefix
