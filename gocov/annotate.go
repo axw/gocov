@@ -38,6 +38,13 @@ const (
 	missPrefix = "MISS"
 )
 
+var (
+	annotateFlags       = flag.NewFlagSet("annotate", flag.ExitOnError)
+	annotateCeilingFlag = annotateFlags.Float64(
+		"ceiling", 101,
+		"Annotate only functions whose coverage is less than the specified percentage")
+)
+
 type packageList []*gocov.Package
 type functionList []*gocov.Function
 
@@ -70,18 +77,29 @@ type annotator struct {
 	files map[string]*token.File
 }
 
+func percentReached(fn *gocov.Function) float64 {
+	if len(fn.Statements) == 0 {
+		return 0
+	}
+	var reached int
+	for _, stmt := range fn.Statements {
+		if stmt.Reached > 0 {
+			reached++
+		}
+	}
+	return float64(reached) / float64(len(fn.Statements)) * 100
+}
+
 func annotateSource() (rc int) {
-	if flag.NArg() == 1 {
-		fmt.Fprintf(os.Stderr, "missing coverage file and function patterns\n")
-		return 1
-	} else if flag.NArg() < 3 {
-		fmt.Fprintf(os.Stderr, "missing function patterns\n")
+	annotateFlags.Parse(os.Args[2:])
+	if annotateFlags.NArg() == 0 {
+		fmt.Fprintf(os.Stderr, "missing coverage file\n")
 		return 1
 	}
 
 	var data []byte
 	var err error
-	if filename := flag.Arg(1); filename == "-" {
+	if filename := annotateFlags.Arg(0); filename == "-" {
 		data, err = ioutil.ReadAll(os.Stdin)
 	} else {
 		data, err = ioutil.ReadFile(filename)
@@ -109,8 +127,7 @@ func annotateSource() (rc int) {
 	a.files = make(map[string]*token.File)
 
 	var regexps []*regexp.Regexp
-	for i := 2; i < flag.NArg(); i++ {
-		arg := flag.Arg(i)
+	for _, arg := range annotateFlags.Args()[1:] {
 		re, err := regexp.Compile(arg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to compile %q as a regular expression, ignoring\n", arg)
@@ -118,18 +135,22 @@ func annotateSource() (rc int) {
 			regexps = append(regexps, re)
 		}
 	}
-	if len(regexps) > 0 {
-		for _, pkg := range packages {
-			for _, fn := range pkg.Functions {
-				name := pkg.Name + "/" + fn.Name
-				for _, regexp := range regexps {
-					if regexp.FindStringIndex(name) != nil {
-						err := a.printFunctionSource(fn)
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "warning: failed to annotate function %q\n", name)
-						}
-						break
+	if len(regexps) == 0 {
+		regexps = append(regexps, regexp.MustCompile("."))
+	}
+	for _, pkg := range packages {
+		for _, fn := range pkg.Functions {
+			if percentReached(fn) >= *annotateCeilingFlag {
+				continue
+			}
+			name := pkg.Name + "/" + fn.Name
+			for _, regexp := range regexps {
+				if regexp.FindStringIndex(name) != nil {
+					err := a.printFunctionSource(fn)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "warning: failed to annotate function %q\n", name)
 					}
+					break
 				}
 			}
 		}
