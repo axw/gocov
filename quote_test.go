@@ -38,6 +38,6 @@ func TestQuote(t *testing.T) {
 	}
 
 	if !checkPanic(func() { quote("`") }) {
-		t.Error("Expected quote(%q) to panic", "`")
+		t.Errorf("Expected quote(%q) to panic", "`")
 	}
 }
