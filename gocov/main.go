@@ -145,7 +145,33 @@ func symlinkHierarchy(src, dst string) error {
 			return nil
 		}
 
-		if info.IsDir() {
+		// Walk directory symlinks. Check for target
+		// existence above and os.MkdirAll below guards
+		// against infinite recursion.
+		mode := info.Mode()
+		if mode&os.ModeSymlink == os.ModeSymlink {
+			realpath, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			if !filepath.IsAbs(realpath) {
+				dir := filepath.Dir(path)
+				realpath = filepath.Join(dir, realpath)
+			}
+			info, err := os.Stat(realpath)
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				err = os.MkdirAll(target, 0700)
+				if err != nil {
+					return err
+				}
+				return symlinkHierarchy(realpath, target)
+			}
+		}
+
+		if mode.IsDir() {
 			return os.MkdirAll(target, 0700)
 		} else {
 			err = os.Symlink(path, target)
@@ -364,7 +390,7 @@ func instrumentAndTest() (rc int) {
 	}
 
 	goroot := runtime.GOROOT()
-	for _, name := range [...]string{"src", "pkg", "bin", "lib", "include"} {
+	for _, name := range [...]string{"src", "pkg"} {
 		dir := filepath.Join(goroot, name)
 		err = symlinkHierarchy(dir, filepath.Join(tempDir, name))
 		if err != nil {
