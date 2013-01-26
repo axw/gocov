@@ -62,3 +62,6 @@ it with coverage information, such as which lines have been missed.
 
 [GoCovGUI](http://github.com/nsf/gocovgui/):
 A simple GUI wrapper for the gocov coverage analysis tool.
+
+[gocov-html](https://github.com/matm/gocov-html):
+A simple helper tool for generating HTML output from gocov.
