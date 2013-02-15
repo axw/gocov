@@ -22,6 +22,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/axw/gocov"
@@ -43,6 +44,7 @@ import (
 
 const gocovPackagePath = "github.com/axw/gocov"
 const instrumentedGocovPackagePath = "github.com/axw/gocov/instrumented"
+const unmanagedPackagePathRoot = "github.com/axw/gocov/unmanaged"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n\n\tgocov command [arguments]\n\n")
@@ -92,10 +94,10 @@ func verbosef(f string, args ...interface{}) {
 }
 
 type instrumenter struct {
-	gopath       string // temporary gopath
+	goroot       string // temporary GOROOT
 	excluded     []string
 	instrumented map[string]*gocov.Package
-	processed    map[string]struct{}
+	processed    map[string]bool
 	workingdir   string // path of package currently being processed
 }
 
@@ -208,15 +210,26 @@ func instrumentable(path string) bool {
 }
 
 // abspkgpath converts a possibly local import path to an absolute package path.
-func (in *instrumenter) abspkgpath(pkgpath string) (error, string) {
+func (in *instrumenter) abspkgpath(pkgpath string) (string, error) {
 	if pkgpath == "C" || pkgpath == "unsafe" {
-		return nil, pkgpath
+		return pkgpath, nil
 	}
 	p, err := build.Import(pkgpath, in.workingdir, build.FindOnly)
 	if err != nil {
-		return err, ""
+		return "", err
 	}
-	return nil, p.ImportPath
+	if build.IsLocalImport(p.ImportPath) {
+		// If a local import was provided to go/build, but
+		// it exists inside a GOPATH, go/build will fill in
+		// the GOPATH import path. Otherwise it will remain
+		// a local import path.
+		err = errors.New(`
+Coverage testing of packages outside of GOPATH is not currently supported.
+See: https://github.com/axw/gocov/issues/30
+`)
+		return "", err
+	}
+	return p.ImportPath, nil
 }
 
 func instrumentedPackagePath(pkgpath string) string {
@@ -230,12 +243,12 @@ func instrumentedPackagePath(pkgpath string) string {
 }
 
 func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) error {
-	if _, already := in.processed[pkgpath]; already {
+	if already := in.processed[pkgpath]; already {
 		return nil
 	}
 	defer func() {
 		if _, instrumented := in.instrumented[pkgpath]; !instrumented {
-			in.processed[pkgpath] = struct{}{}
+			in.processed[pkgpath] = true
 		}
 	}()
 
@@ -283,7 +296,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 			imports = append(imports, buildpkg.XTestImports...)
 		}
 		for _, subpkgpath := range imports {
-			err, subpkgpath = in.abspkgpath(subpkgpath)
+			subpkgpath, err = in.abspkgpath(subpkgpath)
 			if err != nil {
 				return err
 			}
@@ -317,7 +330,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 	// otherwise copying the files. Instrumented files will replace
 	// the symlinks with new files.
 	ipkgpath := instrumentedPackagePath(pkgpath)
-	cloneDir := filepath.Join(in.gopath, "src", "pkg", ipkgpath)
+	cloneDir := filepath.Join(in.goroot, "src", "pkg", ipkgpath)
 	err = symlinkHierarchy(buildpkg.Dir, cloneDir)
 	if err != nil {
 		return err
@@ -424,16 +437,19 @@ func instrumentAndTest() (rc int) {
 	}
 
 	in := &instrumenter{
-		gopath:       tempDir,
+		goroot:       tempDir,
 		instrumented: make(map[string]*gocov.Package),
 		excluded:     excluded,
-		processed:    make(map[string]struct{}),
-		workingdir:   cwd}
-	err, packageName = in.abspkgpath(packageName)
+		processed:    make(map[string]bool),
+		workingdir:   cwd,
+	}
+	var absPackagePath string
+	absPackagePath, err = in.abspkgpath(packageName)
 	if err != nil {
 		errorf("failed to resolve package path(%s): %s\n", packageName, err)
 		return 1
 	}
+	packageName = absPackagePath
 	err = in.instrumentPackage(packageName, true)
 	if err != nil {
 		errorf("failed to instrument package(%s): %s\n", packageName, err)
