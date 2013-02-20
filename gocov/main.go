@@ -488,7 +488,9 @@ func instrumentAndTest() (rc int) {
 	}
 	instrumentedPackageName := instrumentedPackagePath(packageName)
 	args = append(args, instrumentedPackageName)
-	args = append(args, testFlags.Args()[1:]...)
+	if testFlags.NArg() > 1 {
+		args = append(args, testFlags.Args()[1:]...)
+	}
 	cmd := exec.Command("go", args...)
 	cmd.Env = env
 	cmd.Stdout = os.Stderr
