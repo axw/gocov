@@ -470,7 +470,6 @@ func instrumentAndTest() (rc int) {
 	}
 
 	// Run "go test".
-	// TODO pass through test flags.
 	outfilePath := filepath.Join(tempDir, "gocov.out")
 	env := os.Environ()
 	env = putenv(env, "GOCOVOUT", outfilePath)
