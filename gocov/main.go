@@ -72,6 +72,9 @@ var (
 		"work", false,
 		"print the name of the temporary work directory "+
 			"and do not delete it when exiting")
+	testTagsFlag = testFlags.String(
+		"tags", "",
+		"a list of build tags to consider satisfied during the build")
 	testRunFlag = testFlags.String(
 		"run", "",
 		"Run only those tests and examples matching the regular "+
@@ -97,6 +100,7 @@ func verbosef(f string, args ...interface{}) {
 
 type instrumenter struct {
 	goroot       string // temporary GOROOT
+	context      build.Context
 	excluded     []string
 	instrumented map[string]*gocov.Package
 	processed    map[string]bool
@@ -114,7 +118,7 @@ func putenv(env []string, key, value string) []string {
 }
 
 func (in *instrumenter) parsePackage(path string, fset *token.FileSet) (*build.Package, *ast.Package, error) {
-	p, err := build.Import(path, in.workingdir, 0)
+	p, err := in.context.Import(path, in.workingdir, 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -216,7 +220,7 @@ func (in *instrumenter) abspkgpath(pkgpath string) (string, error) {
 	if pkgpath == "C" || pkgpath == "unsafe" {
 		return pkgpath, nil
 	}
-	p, err := build.Import(pkgpath, in.workingdir, build.FindOnly)
+	p, err := in.context.Import(pkgpath, in.workingdir, build.FindOnly)
 	if err != nil {
 		return "", err
 	}
@@ -415,7 +419,8 @@ func instrumentAndTest() (rc int) {
 	}
 
 	// Copy gocov into the temporary GOROOT, since otherwise it'll
-	// be eclipsed by the instrumented packages root.
+	// be eclipsed by the instrumented packages root. Use the default
+	// build context here since gocov doesn't use custom build tags.
 	if p, err := build.Import(gocovPackagePath, "", build.FindOnly); err == nil {
 		err = symlinkHierarchy(p.Dir, filepath.Join(tempDir, "src", "pkg", gocovPackagePath))
 		if err != nil {
@@ -438,8 +443,14 @@ func instrumentAndTest() (rc int) {
 		errorf("failed to determine current working directory: %s\n", err)
 	}
 
+	context := build.Default
+	if *testTagsFlag != "" {
+		context.BuildTags = strings.Fields(*testTagsFlag)
+	}
+
 	in := &instrumenter{
 		goroot:       tempDir,
+		context:      context,
 		instrumented: make(map[string]*gocov.Package),
 		excluded:     excluded,
 		processed:    make(map[string]bool),
@@ -478,6 +489,9 @@ func instrumentAndTest() (rc int) {
 	args := []string{"test"}
 	if verbose {
 		args = append(args, "-v")
+	}
+	if *testTagsFlag != "" {
+		args = append(args, "-tags", *testTagsFlag)
 	}
 	if *testRunFlag != "" {
 		args = append(args, "-run", *testRunFlag)
