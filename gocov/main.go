@@ -138,6 +138,11 @@ func (in *instrumenter) parsePackage(path string, fset *token.FileSet) (*build.P
 }
 
 func symlinkHierarchy(src, dst string) error {
+	// First check if the destination exists; if so, bail out
+	// before doing a potentially expensive walk.
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
 	fn := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -335,13 +340,35 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 	// Clone the directory structure, symlinking files (if possible),
 	// otherwise copying the files. Instrumented files will replace
 	// the symlinks with new files.
-	ipkgpath := instrumentedPackagePath(pkgpath)
-	cloneDir := filepath.Join(in.goroot, "src", "pkg", ipkgpath)
-	err = symlinkHierarchy(buildpkg.Dir, cloneDir)
-	if err != nil {
-		return err
+	//
+	// If we instrument package x/y, and x/y uses package x, then
+	// we must be sure to also symlink the files in package x,
+	// as it'll be picked up in the instrumented GOROOT.
+	parts := strings.Split(pkgpath, "/")
+	partpath := parts[0]
+	for i, part := range parts[1:] {
+		p, err := in.context.Import(partpath, in.workingdir, 0)
+		if err != nil && i+2 == len(parts) {
+			return err
+		}
+		if p.SrcRoot == buildpkg.SrcRoot {
+			ipkgpath := instrumentedPackagePath(partpath)
+			clonedir := filepath.Join(in.goroot, "src", "pkg", ipkgpath)
+			err = symlinkHierarchy(p.Dir, clonedir)
+			if err != nil {
+				return err
+			}
+			// You might think we can break here, but we can't;
+			// since "instrumentedPackagePath" may change the
+			// package path between source and destination, we
+			// must check each level in the hierarchy individually.
+		}
+		partpath += "/" + part
 	}
+
 	// pkg == nil if there are only test files.
+	ipkgpath := instrumentedPackagePath(pkgpath)
+	clonedir := filepath.Join(in.goroot, "src", "pkg", ipkgpath)
 	if pkg != nil {
 		for filename, f := range pkg.Files {
 			err := in.instrumentFile(f, fset, pkgpath)
@@ -352,7 +379,7 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 		}
 	}
 	for filename, f := range rewriteFiles {
-		filepath := filepath.Join(cloneDir, filepath.Base(filename))
+		filepath := filepath.Join(clonedir, filepath.Base(filename))
 		err = os.Remove(filepath)
 		if err != nil {
 			return err
