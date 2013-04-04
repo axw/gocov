@@ -555,28 +555,44 @@ func instrumentAndTest() (rc int) {
 	if testFlags.NArg() > 1 {
 		args = append(args, testFlags.Args()[1:]...)
 	}
-	cmd := exec.Command("go", args...)
+
+	// First run with "-i" to avoid the warning
+	// about out-of-date packages.
+	testiargs := append([]string{args[0], "-i"}, args[1:]...)
+	cmd := exec.Command("go", testiargs...)
 	cmd.Env = env
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
-
 	if err != nil {
-		errorf("go test failed: %s\n", err)
-		rc = 1
-	}
-
-	packages, err := parser.ParseTrace(outfilePath)
-	if err != nil {
-		errorf("failed to parse gocov output: %s\n", err)
+		errorf("go test -i failed: %s\n", err)
 		rc = 1
 	} else {
-		data, err := marshalJson(packages)
+		// Now run "go test" normally.
+		cmd = exec.Command("go", args...)
+		cmd.Env = env
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
 		if err != nil {
-			errorf("failed to format as JSON: %s\n", err)
+			errorf("go test failed: %s\n", err)
+			rc = 1
+		}
+	}
+
+	if err == nil {
+		packages, err := parser.ParseTrace(outfilePath)
+		if err != nil {
+			errorf("failed to parse gocov output: %s\n", err)
 			rc = 1
 		} else {
-			fmt.Println(string(data))
+			data, err := marshalJson(packages)
+			if err != nil {
+				errorf("failed to format as JSON: %s\n", err)
+				rc = 1
+			} else {
+				fmt.Println(string(data))
+			}
 		}
 	}
 	return
