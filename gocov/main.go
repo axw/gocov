@@ -180,7 +180,27 @@ func symlinkHierarchy(src, dst string) error {
 				if err != nil {
 					return err
 				}
-				return symlinkHierarchy(realpath, target)
+				// Symlink contents, as the MkdirAll above
+				// and the initial existence check will work
+				// against each other.
+				f, err := os.Open(realpath)
+				if err != nil {
+					return err
+				}
+				names, err := f.Readdirnames(-1)
+				f.Close()
+				if err != nil {
+					return err
+				}
+				for _, name := range names {
+					realpath := filepath.Join(realpath, name)
+					target := filepath.Join(target, name)
+					err = symlinkHierarchy(realpath, target)
+					if err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 		}
 
@@ -345,13 +365,18 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 	// we must be sure to also symlink the files in package x,
 	// as it'll be picked up in the instrumented GOROOT.
 	parts := strings.Split(pkgpath, "/")
-	partpath := parts[0]
-	for i, part := range parts[1:] {
+	var partpath string
+	for i, part := range parts {
+		if i == 0 {
+			partpath = part
+		} else {
+			partpath += "/" + part
+		}
 		p, err := in.context.Import(partpath, in.workingdir, 0)
-		if err != nil && i+2 == len(parts) {
+		if err != nil && i+1 == len(parts) {
 			return err
 		}
-		if p.SrcRoot == buildpkg.SrcRoot {
+		if err == nil && p.SrcRoot == buildpkg.SrcRoot {
 			ipkgpath := instrumentedPackagePath(partpath)
 			clonedir := filepath.Join(in.goroot, "src", "pkg", ipkgpath)
 			err = symlinkHierarchy(p.Dir, clonedir)
@@ -363,7 +388,6 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 			// package path between source and destination, we
 			// must check each level in the hierarchy individually.
 		}
-		partpath += "/" + part
 	}
 
 	// pkg == nil if there are only test files.
