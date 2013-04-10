@@ -81,11 +81,13 @@ var (
 			"expression.")
 	testTimeoutFlag = testFlags.String(
 		"timeout", "", "If a test runs longer than t, panic.")
-	verbose bool
+	verbose  bool
+	verboseX bool
 )
 
 func init() {
-	testFlags.BoolVar(&verbose, "v", false, "verbose")
+	testFlags.BoolVar(&verbose, "v", false, "be verbose")
+	testFlags.BoolVar(&verboseX, "x", false, "be verbose and print the commands")
 }
 
 func errorf(f string, args ...interface{}) {
@@ -541,6 +543,9 @@ func instrumentAndTest() (rc int) {
 	if verbose {
 		args = append(args, "-v")
 	}
+	if verboseX {
+		args = append(args, "-x")
+	}
 	if *testTagsFlag != "" {
 		args = append(args, "-tags", *testTagsFlag)
 	}
@@ -601,6 +606,10 @@ func instrumentAndTest() (rc int) {
 func main() {
 	flag.Usage = usage
 	flag.Parse()
+	if verboseX {
+		verbose = true
+	}
+
 	command := ""
 	if flag.NArg() > 0 {
 		command = flag.Arg(0)
