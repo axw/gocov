@@ -2,6 +2,11 @@
 
 Coverage testing tool for The Go Programming Language
 
+[![Build Status][1]][2]
+
+[1]: https://secure.travis-ci.org/axw/gocov.png
+[2]: http://www.travis-ci.org/axw/gocov
+
 ## Installation
 
 ```go get github.com/axw/gocov/gocov```
