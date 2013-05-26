@@ -70,3 +70,6 @@ A simple GUI wrapper for the gocov coverage analysis tool.
 
 [gocov-html](https://github.com/matm/gocov-html):
 A simple helper tool for generating HTML output from gocov.
+
+[goveralls](https://github.com/mattn/goveralls):
+Go integration for Coveralls.io continuous code coverage tracking system.
