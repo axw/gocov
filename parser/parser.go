@@ -23,11 +23,11 @@ package parser
 import (
 	"fmt"
 	"github.com/axw/gocov"
+	"github.com/axw/gocov/gocovutil"
 	"go/scanner"
 	"go/token"
 	"io/ioutil"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -58,7 +58,7 @@ type parser struct {
 
 	context  *gocov.Context
 	objects  map[int]gocov.Object
-	packages []*gocov.Package
+	packages gocovutil.Packages
 }
 
 func (p *parser) next() token.Token {
@@ -91,7 +91,7 @@ func (p *parser) parseRegisterPackage() {
 		panic(fmt.Errorf("uid differs: source must have changed"))
 	}
 	p.objects[uid] = pkg
-	p.packages = append(p.packages, pkg)
+	p.packages.AddPackage(pkg)
 }
 
 func (p *parser) parseRegisterFunction(pkg *gocov.Package) {
@@ -214,21 +214,5 @@ func ParseTrace(path string) (pkgs []*gocov.Package, err error) {
 		context: &gocov.Context{},
 	}
 	p.parse()
-
-	// Merge packages with the same path. This is to cater for "." imports,
-	// which can result in two copies of the same package existing
-	// simultaneously within a program.
-	for _, p := range p.packages {
-		i := sort.Search(len(pkgs), func(i int) bool {
-			return pkgs[i].Name >= p.Name
-		})
-		if i < len(pkgs) && pkgs[i].Name == p.Name {
-			pkgs[i].Accumulate(p)
-		} else {
-			head := pkgs[:i]
-			tail := append([]*gocov.Package{p}, pkgs[i:]...)
-			pkgs = append(head, tail...)
-		}
-	}
-	return
+	return p.packages, nil
 }

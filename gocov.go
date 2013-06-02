@@ -148,6 +148,10 @@ func init() {
 	case "-":
 		Default.Tracer = fdwriter(syscall.Stdout)
 	default:
+		// Add the process ID to the filename.
+		// TODO handle PID reuse by checking if file exists.
+		path += "." + itoa(syscall.Getpid())
+
 		mode := syscall.O_WRONLY | syscall.O_CREAT | syscall.O_TRUNC
 		fd, err := syscall.Open(path, mode, 0666)
 		if err != nil {

@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/axw/gocov"
+	"github.com/axw/gocov/gocovutil"
 	"github.com/axw/gocov/parser"
 	"go/ast"
 	"go/build"
@@ -81,6 +82,8 @@ var (
 			"expression.")
 	testTimeoutFlag = testFlags.String(
 		"timeout", "", "If a test runs longer than t, panic.")
+	testParallelFlag = testFlags.Int(
+		"parallel", runtime.GOMAXPROCS(-1), "Run test in parallel (see: go help testflag)")
 	verbose  bool
 	verboseX bool
 )
@@ -437,11 +440,72 @@ func unmarshalJson(data []byte) (packages []*gocov.Package, err error) {
 	return
 }
 
+// packagesAndTestargs returns a list of package paths
+// and a list of arguments to pass on to "go test".
+func packagesAndTestargs() ([]string, []string, error) {
+	// Everything before the first arg starting with "-"
+	// is considered a package, and everything after/including
+	// is an argument to pass on to "go test".
+	var packagepaths, gotestargs []string
+	if testFlags.NArg() > 0 {
+		split := -1
+		args := testFlags.Args()
+		for i, arg := range args {
+			if strings.HasPrefix(arg, "-") {
+				split = i
+				break
+			}
+		}
+		if split >= 0 {
+			packagepaths = args[:split]
+			gotestargs = args[split:]
+		} else {
+			packagepaths = args
+		}
+	}
+	if len(packagepaths) == 0 {
+		packagepaths = []string{"."}
+	}
+
+	// Run "go list <packagepaths>" to expand "...", evaluate
+	// "std", "all", etc. Also, "go list" collapses duplicates.
+	args := []string{"list"}
+	if *testTagsFlag != "" {
+		tags := strings.Fields(*testTagsFlag)
+		args = append(args, tags...)
+	}
+	args = append(args, packagepaths...)
+	output, err := exec.Command("go", args...).CombinedOutput()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, string(output))
+		return nil, nil, err
+	} else {
+		packagepaths = strings.Fields(string(output))
+	}
+
+	// FIXME we don't currently handle testing cmd/*, as they
+	// are not regular packages. This means "gocov test std"
+	// can't work unless we ignore cmd/* or until we implement
+	// support.
+	var prunedpaths []string
+	for _, p := range packagepaths {
+		if !strings.HasPrefix(p, "cmd/") {
+			prunedpaths = append(prunedpaths, p)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: support for cmd/* not supported, ignoring %s\n", p)
+		}
+	}
+	packagepaths = prunedpaths
+
+	return packagepaths, gotestargs, nil
+}
+
 func instrumentAndTest() (rc int) {
 	testFlags.Parse(os.Args[2:])
-	packageName := "."
-	if testFlags.NArg() > 0 {
-		packageName = testFlags.Arg(0)
+	packagePaths, gotestArgs, err := packagesAndTestargs()
+	if err != nil {
+		errorf("failed to process package list: %s\n", err)
+		return 1
 	}
 
 	tempDir, err := ioutil.TempDir("", "gocov")
@@ -509,17 +573,22 @@ func instrumentAndTest() (rc int) {
 		processed:    make(map[string]bool),
 		workingdir:   cwd,
 	}
-	var absPackagePath string
-	absPackagePath, err = in.abspkgpath(packageName)
-	if err != nil {
-		errorf("failed to resolve package path(%s): %s\n", packageName, err)
-		return 1
-	}
-	packageName = absPackagePath
-	err = in.instrumentPackage(packageName, true)
-	if err != nil {
-		errorf("failed to instrument package(%s): %s\n", packageName, err)
-		return 1
+
+	instrumentedPackagePaths := make([]string, len(packagePaths))
+	for i, packagePath := range packagePaths {
+		var absPackagePath string
+		absPackagePath, err = in.abspkgpath(packagePath)
+		if err != nil {
+			errorf("failed to resolve package path(%s): %s\n", packagePath, err)
+			return 1
+		}
+		packagePath = absPackagePath
+		err = in.instrumentPackage(packagePath, true)
+		if err != nil {
+			errorf("failed to instrument package(%s): %s\n", packagePath, err)
+			return 1
+		}
+		instrumentedPackagePaths[i] = instrumentedPackagePath(packagePath)
 	}
 
 	ninstrumented := 0
@@ -534,9 +603,9 @@ func instrumentAndTest() (rc int) {
 	}
 
 	// Run "go test".
-	outfilePath := filepath.Join(tempDir, "gocov.out")
+	const gocovOutPrefix = "gocov.out"
 	env := os.Environ()
-	env = putenv(env, "GOCOVOUT", outfilePath)
+	env = putenv(env, "GOCOVOUT", filepath.Join(tempDir, gocovOutPrefix))
 	env = putenv(env, "GOROOT", tempDir)
 
 	args := []string{"test"}
@@ -555,11 +624,9 @@ func instrumentAndTest() (rc int) {
 	if *testTimeoutFlag != "" {
 		args = append(args, "-timeout", *testTimeoutFlag)
 	}
-	instrumentedPackageName := instrumentedPackagePath(packageName)
-	args = append(args, instrumentedPackageName)
-	if testFlags.NArg() > 1 {
-		args = append(args, testFlags.Args()[1:]...)
-	}
+	args = append(args, "-parallel", fmt.Sprint(*testParallelFlag))
+	args = append(args, instrumentedPackagePaths...)
+	args = append(args, gotestArgs...)
 
 	// First run with "-i" to avoid the warning
 	// about out-of-date packages.
@@ -571,7 +638,7 @@ func instrumentAndTest() (rc int) {
 	err = cmd.Run()
 	if err != nil {
 		errorf("go test -i failed: %s\n", err)
-		rc = 1
+		return 1
 	} else {
 		// Now run "go test" normally.
 		cmd = exec.Command("go", args...)
@@ -581,24 +648,45 @@ func instrumentAndTest() (rc int) {
 		err = cmd.Run()
 		if err != nil {
 			errorf("go test failed: %s\n", err)
-			rc = 1
+			return 1
 		}
 	}
 
-	if err == nil {
+	tempDirFile, err := os.Open(tempDir)
+	if err != nil {
+		errorf("failed to open output directory: %s\n", err)
+		return 1
+	}
+	defer tempDirFile.Close()
+
+	names, err := tempDirFile.Readdirnames(-1)
+	if err != nil {
+		errorf("failed to list output directory: %s\n", err)
+		return 1
+	}
+
+	var allpackages gocovutil.Packages
+	for _, name := range names {
+		if !strings.HasPrefix(name, gocovOutPrefix) {
+			continue
+		}
+		outfilePath := filepath.Join(tempDir, name)
 		packages, err := parser.ParseTrace(outfilePath)
 		if err != nil {
 			errorf("failed to parse gocov output: %s\n", err)
-			rc = 1
-		} else {
-			data, err := marshalJson(packages)
-			if err != nil {
-				errorf("failed to format as JSON: %s\n", err)
-				rc = 1
-			} else {
-				fmt.Println(string(data))
-			}
+			return 1
 		}
+		for _, p := range packages {
+			allpackages.AddPackage(p)
+		}
+	}
+
+	data, err := marshalJson(allpackages)
+	if err != nil {
+		errorf("failed to format as JSON: %s\n", err)
+		return 1
+	} else {
+		fmt.Println(string(data))
 	}
 	return
 }
