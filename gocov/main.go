@@ -472,6 +472,7 @@ func packagesAndTestargs() ([]string, []string, error) {
 	args := []string{"list"}
 	if *testTagsFlag != "" {
 		tags := strings.Fields(*testTagsFlag)
+		args = append(args, "-tags")
 		args = append(args, tags...)
 	}
 	args = append(args, packagepaths...)
