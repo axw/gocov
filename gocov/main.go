@@ -316,7 +316,8 @@ func (in *instrumenter) instrumentPackage(pkgpath string, testPackage bool) erro
 	verbosef("instrumenting package %q\n", pkgpath)
 
 	if testPackage && len(buildpkg.TestGoFiles)+len(buildpkg.XTestGoFiles) == 0 {
-		return fmt.Errorf("no test files")
+		verbosef("skipping %q because no test files\n", buildpkg.Name)
+		return nil
 	}
 
 	// Set a "working directory", for resolving relative imports.
