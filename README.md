@@ -68,5 +68,8 @@ A simple GUI wrapper for the gocov coverage analysis tool.
 [gocov-html](https://github.com/matm/gocov-html):
 A simple helper tool for generating HTML output from gocov.
 
+[gocov-xml](https://github.com/AlekSi/gocov-xml):
+A simple helper tool for generating XML output in Cobertura format for CIs like Jenkins and others from gocov.
+
 [goveralls](https://github.com/mattn/goveralls):
 Go integration for Coveralls.io continuous code coverage tracking system.
