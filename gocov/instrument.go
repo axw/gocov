@@ -232,7 +232,7 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 	var vardecls []ast.Decl
 	pkgvarname := fmt.Sprint(pkgObj)
 	if pkgCreated {
-		value := makeCall("gocov.RegisterPackage", makeLit(pkgpath))
+		value := makeCall("_gocov.RegisterPackage", makeLit(pkgpath))
 		vardecls = append(vardecls, makeVarDecl(pkgvarname, value))
 	}
 	for _, fn := range state.functions {
@@ -259,7 +259,7 @@ func (in *instrumenter) instrumentFile(f *ast.File, fset *token.FileSet, pkgpath
 	// Add a "gocov" import.
 	if pkgCreated {
 		gocovImportSpec := &ast.ImportSpec{
-			Path: makeLit(gocovPackagePath).(*ast.BasicLit)}
+			Path: makeLit(gocovPackagePath).(*ast.BasicLit), Name: ast.NewIdent("_gocov")}
 		gocovImportGenDecl := &ast.GenDecl{
 			Tok: token.IMPORT, Specs: []ast.Spec{gocovImportSpec}}
 		tail := make([]ast.Decl, len(f.Decls)-nImportDecls)
