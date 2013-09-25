@@ -604,6 +604,27 @@ func instrumentAndTest() (rc int) {
 		return 1
 	}
 
+	// Temporarily rename package archives in
+	// $GOPATH, for instrumented packages.
+	for _, packagePath := range packagePaths {
+		p, err := in.context.Import(packagePath, in.workingdir, build.FindOnly)
+		if err == nil && !p.Goroot && p.PkgObj != "" {
+			verbosef("temporarily renaming package object %s\n", p.PkgObj)
+			err = os.Rename(p.PkgObj, p.PkgObj+".gocov")
+			if err != nil {
+				verbosef(" - failed to rename: %v\n", err)
+			} else {
+				defer func(pkgobj string) {
+					verbosef("restoring package object %s\n", pkgobj)
+					err = os.Rename(pkgobj+".gocov", pkgobj)
+					if err != nil {
+						verbosef(" - failed to restore package object: %v\n", err)
+					}
+				}(p.PkgObj)
+			}
+		}
+	}
+
 	// Run "go test".
 	const gocovOutPrefix = "gocov.out"
 	env := os.Environ()
