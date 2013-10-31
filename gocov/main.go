@@ -88,8 +88,7 @@ var (
 
 		// See: golang.org/src/cmd/go/testflag.go the '-p' flag seems to be "undocumented", it is in a usage message,
 		// but I haven't worked out what command to run to display that message
-		// The default is 2 since that seems to be the default for 'go test' when GOMAXPROCS is 1
-		"p", runtime.GOMAXPROCS(-1)+1, "Run test packages in parallel (see: golang.org/src/cmd/go/testflag.go)")
+		"p", runtime.GOMAXPROCS(0), "Run test packages in parallel (see: golang.org/src/cmd/go/testflag.go)")
 	verbose  bool
 	verboseX bool
 )
