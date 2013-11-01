@@ -62,7 +62,7 @@ var (
 	testFlags    = flag.NewFlagSet("test", flag.ExitOnError)
 	testDepsFlag = testFlags.Bool(
 		"deps", false,
-		"Instrument all package dependencies, including transitive")
+		"instrument all package dependencies, including transitive")
 	testExcludeFlag = testFlags.String(
 		"exclude", "",
 		"packages to exclude, separated by comma")
@@ -78,17 +78,15 @@ var (
 		"a list of build tags to consider satisfied during the build")
 	testRunFlag = testFlags.String(
 		"run", "",
-		"Run only those tests and examples matching the regular "+
+		"run only those tests and examples matching the regular "+
 			"expression.")
 	testTimeoutFlag = testFlags.String(
-		"timeout", "", "If a test runs longer than t, panic.")
+		"timeout", "", "if a test runs longer than t, panic.")
 	testParallelFlag = testFlags.Int(
-		"parallel", runtime.GOMAXPROCS(-1), "Run test in parallel (see: go help testflag)")
+		"parallel", runtime.GOMAXPROCS(-1), "run tests in parallel (see: go help testflag)")
 	testPackageParallelFlag = testFlags.Int(
-
-		// See: golang.org/src/cmd/go/testflag.go the '-p' flag seems to be "undocumented", it is in a usage message,
-		// but I haven't worked out what command to run to display that message
-		"p", runtime.GOMAXPROCS(0), "Run test packages in parallel (see: golang.org/src/cmd/go/testflag.go)")
+		"p", runtime.NumCPU(),
+		"build and test up to N packages in parallel")
 	verbose  bool
 	verboseX bool
 )
