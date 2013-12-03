@@ -20,106 +20,32 @@
 
 package gocov
 
-import (
-	"bytes"
-	"runtime"
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestMallocs(t *testing.T) {
-	ctx := &Context{}
-	p := ctx.RegisterPackage("p1")
-	f := p.RegisterFunction("f1", "file.go", 0, 1)
-	s := f.RegisterStatement(0, 1)
-
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
-	m0 := ms.Mallocs
-
-	f.Enter()
-	s.At()
-	f.Leave()
-
-	runtime.ReadMemStats(&ms)
-	mallocs := ms.Mallocs - m0
-	if mallocs > 0 {
-		t.Errorf("%d mallocs; want 0", mallocs)
-	}
+func registerPackage(name string) *Package {
+	return &Package{Name: name}
 }
 
-func TestTraceOutput(t *testing.T) {
-	var buf bytes.Buffer
-	ctx := &Context{Tracer: &buf}
-	check := func(expected string) {
-		actual := strings.TrimSpace(buf.String())
-		if actual != expected {
-			t.Errorf("Expected %q, found %q", expected, actual)
-		}
-	}
-
-	p := ctx.RegisterPackage("p1")
-	check("RegisterPackage(`p1`): gocovObject0")
-	buf.Reset()
-
-	f := p.RegisterFunction("f1", "file.go", 0, 1)
-	check("gocovObject0.RegisterFunction(`f1`, `file.go`, 0, 1): gocovObject1")
-	buf.Reset()
-
-	s := f.RegisterStatement(0, 1)
-	check(`gocovObject1.RegisterStatement(0, 1): gocovObject2`)
-	buf.Reset()
-
-	f.Enter()
-	check(`gocovObject1.Enter()`)
-	buf.Reset()
-
-	s.At()
-	check(`gocovObject2.At()`)
-	buf.Reset()
-
-	f.Leave()
-	check(`gocovObject1.Leave()`)
-	buf.Reset()
+func registerFunction(p *Package, name, file string, startOffset, endOffset int) *Function {
+	f := &Function{Name: name, File: file, Start: startOffset, End: endOffset}
+	p.Functions = append(p.Functions, f)
+	return f
 }
 
-func TestTraceFlags(t *testing.T) {
-	var buf bytes.Buffer
-	ctx := &Context{Tracer: &buf}
-	check := func(expected string) {
-		actual := strings.TrimSpace(buf.String())
-		if actual != expected {
-			t.Errorf("Expected %q, found %q", expected, actual)
-		}
-	}
-
-	p := ctx.RegisterPackage("p1")
-	f := p.RegisterFunction("f1", "file.go", 0, 1)
-	f.Enter()
-	buf.Reset()
-
-	// TraceAll is not set, second entry should be silent.
-	f.Enter()
-	check("")
-
-	// TraceAll set now, so should get another log message.
-	ctx.TraceFlags = TraceAll
-	f.Enter()
-	check(f.String() + ".Enter()")
-	if f.Entered != 3 {
-		t.Errorf("Expected f.Entered == 3, found %d", f.Entered)
-	}
+func registerStatement(f *Function, startOffset, endOffset int) *Statement {
+	s := &Statement{Start: startOffset, End: endOffset}
+	f.Statements = append(f.Statements, s)
+	return s
 }
 
 func TestAccumulatePackage(t *testing.T) {
-	ctx := &Context{}
-	p1_1 := ctx.RegisterPackage("p1")
-	p1_2 := ctx.RegisterPackage("p1")
-	p2 := ctx.RegisterPackage("p2")
-	p3 := ctx.RegisterPackage("p1")
-	p3.RegisterFunction("f", "file.go", 0, 1)
-	p4 := ctx.RegisterPackage("p1")
-	p4.RegisterFunction("f", "file.go", 1, 2)
+	p1_1 := registerPackage("p1")
+	p1_2 := registerPackage("p1")
+	p2 := registerPackage("p2")
+	p3 := registerPackage("p1")
+	registerFunction(p3, "f", "file.go", 0, 1)
+	p4 := registerPackage("p1")
+	registerFunction(p4, "f", "file.go", 1, 2)
 
 	var tests = [...]struct {
 		a, b       *Package
@@ -150,17 +76,16 @@ func TestAccumulatePackage(t *testing.T) {
 }
 
 func TestAccumulateFunction(t *testing.T) {
-	ctx := &Context{}
-	p := ctx.RegisterPackage("p1")
-	f1_1 := p.RegisterFunction("f1", "file.go", 0, 1)
-	f1_2 := p.RegisterFunction("f1", "file.go", 0, 1)
-	f2 := p.RegisterFunction("f2", "file.go", 0, 1)
-	f3 := p.RegisterFunction("f1", "file2.go", 0, 1)
-	f4 := p.RegisterFunction("f1", "file.go", 2, 3)
-	f5 := p.RegisterFunction("f1", "file.go", 0, 1)
-	f5.RegisterStatement(0, 1)
-	f6 := p.RegisterFunction("f1", "file.go", 0, 1)
-	f6.RegisterStatement(2, 3)
+	p := registerPackage("p1")
+	f1_1 := registerFunction(p, "f1", "file.go", 0, 1)
+	f1_2 := registerFunction(p, "f1", "file.go", 0, 1)
+	f2 := registerFunction(p, "f2", "file.go", 0, 1)
+	f3 := registerFunction(p, "f1", "file2.go", 0, 1)
+	f4 := registerFunction(p, "f1", "file.go", 2, 3)
+	f5 := registerFunction(p, "f1", "file.go", 0, 1)
+	registerStatement(f5, 0, 1)
+	f6 := registerFunction(p, "f1", "file.go", 0, 1)
+	registerStatement(f6, 2, 3)
 
 	var tests = [...]struct {
 		a, b       *Function
@@ -195,12 +120,11 @@ func TestAccumulateFunction(t *testing.T) {
 }
 
 func TestAccumulateStatement(t *testing.T) {
-	ctx := &Context{}
-	p := ctx.RegisterPackage("p1")
-	f := p.RegisterFunction("f1", "file.go", 0, 1)
-	s1_1 := f.RegisterStatement(0, 1)
-	s1_2 := f.RegisterStatement(0, 1)
-	s2 := f.RegisterStatement(2, 3)
+	p := registerPackage("p1")
+	f := registerFunction(p, "f1", "file.go", 0, 1)
+	s1_1 := registerStatement(f, 0, 1)
+	s1_2 := registerStatement(f, 0, 1)
+	s2 := registerStatement(f, 2, 3)
 
 	// Should work: ranges are the same.
 	if err := s1_1.Accumulate(s1_2); err != nil {
@@ -210,28 +134,5 @@ func TestAccumulateStatement(t *testing.T) {
 	// Should fail: ranges are not the same.
 	if err := s1_1.Accumulate(s2); err == nil {
 		t.Errorf("Expected an error")
-	}
-}
-
-func BenchmarkEnterLeave(b *testing.B) {
-	ctx := &Context{}
-	p := ctx.RegisterPackage("p1")
-	f := p.RegisterFunction("f1", "file.go", 0, 1)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		f.Enter()
-		f.Leave()
-	}
-}
-
-func BenchmarkAt(b *testing.B) {
-	ctx := &Context{}
-	p := ctx.RegisterPackage("p1")
-	f := p.RegisterFunction("f1", "file.go", 0, 1)
-	s := f.RegisterStatement(0, 1)
-	f.Enter()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		s.At()
 	}
 }

@@ -23,7 +23,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/axw/gocov"
 	"io"
 	"io/ioutil"
 	"os"
@@ -31,6 +30,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/axw/gocov"
 )
 
 type report struct {
