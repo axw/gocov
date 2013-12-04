@@ -21,7 +21,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"go/ast"
 	"go/build"
@@ -34,11 +33,8 @@ import (
 	"github.com/axw/gocov"
 )
 
-func convertProfiles() error {
-	if flag.NArg() <= 1 {
-		return fmt.Errorf("missing cover profile")
-	}
-	profiles, err := cover.ParseProfiles(flag.Args()[1])
+func convertProfiles(filename string) error {
+	profiles, err := cover.ParseProfiles(filename)
 	if err != nil {
 		return err
 	}

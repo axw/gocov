@@ -35,6 +35,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tannotate\n")
 	fmt.Fprintf(os.Stderr, "\tconvert\n")
 	fmt.Fprintf(os.Stderr, "\treport\n")
+	fmt.Fprintf(os.Stderr, "\ttest\n")
 	fmt.Fprintf(os.Stderr, "\n")
 	flag.PrintDefaults()
 	os.Exit(2)
@@ -62,7 +63,11 @@ func main() {
 		command = flag.Arg(0)
 		switch command {
 		case "convert":
-			if err := convertProfiles(); err != nil {
+			if flag.NArg() <= 1 {
+				fmt.Fprintln(os.Stderr, "missing cover profile")
+				os.Exit(1)
+			}
+			if err := convertProfiles(flag.Args()[1]); err != nil {
 				fmt.Fprintln(os.Stderr, "error: %v", err)
 				os.Exit(1)
 			}
@@ -70,6 +75,11 @@ func main() {
 			os.Exit(annotateSource())
 		case "report":
 			os.Exit(reportCoverage())
+		case "test":
+			if err := runTests(flag.Args()[1:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error: %v", err)
+				os.Exit(1)
+			}
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command: %#q\n\n", command)
 			usage()
