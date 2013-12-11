@@ -49,7 +49,7 @@ var (
 		"Annotate only functions whose coverage is less than the specified percentage")
 	annotateColorFlag = annotateFlags.Bool(
 		"color", false,
-		"Differenciate Coverage with color")
+		"Differentiate Coverage with color")
 )
 
 type packageList []*gocov.Package
