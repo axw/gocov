@@ -37,6 +37,9 @@ import (
 const (
 	hitPrefix  = "    "
 	missPrefix = "MISS"
+	RED        = "\x1b[31;1m"
+	GREEN      = "\x1b[32;1m"
+	NONE       = "\x1b[0m"
 )
 
 var (
@@ -44,6 +47,9 @@ var (
 	annotateCeilingFlag = annotateFlags.Float64(
 		"ceiling", 101,
 		"Annotate only functions whose coverage is less than the specified percentage")
+	annotateColorFlag = annotateFlags.Bool(
+		"color", false,
+		"Differentiate coverage with color")
 )
 
 type packageList []*gocov.Package
@@ -212,11 +218,19 @@ func (a *annotator) printFunctionSource(fn *gocov.Function) error {
 				statements = append(statements[:j], statements[j+1:]...)
 			}
 		}
-		hitmiss := hitPrefix
-		if statementFound && !hit {
-			hitmiss = missPrefix
+		if *annotateColorFlag {
+			color := NONE
+			if statementFound && !hit {
+				color = RED
+			}
+			fmt.Printf("%s%*d \t%s%s\n", color, linenoWidth, lineno, line, NONE)
+		} else {
+			hitmiss := hitPrefix
+			if statementFound && !hit {
+				hitmiss = missPrefix
+			}
+			fmt.Printf("%*d %s\t%s\n", linenoWidth, lineno, hitmiss, line)
 		}
-		fmt.Printf("%*d %s\t%s\n", linenoWidth, lineno, hitmiss, line)
 	}
 	fmt.Println()
 
