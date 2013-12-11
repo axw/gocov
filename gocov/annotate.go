@@ -218,15 +218,19 @@ func (a *annotator) printFunctionSource(fn *gocov.Function) error {
 				statements = append(statements[:j], statements[j+1:]...)
 			}
 		}
-		color := NONE
-		hitmiss := hitPrefix
-		if statementFound && !hit {
-			hitmiss = missPrefix
-			if *annotateColorFlag {
+		if *annotateColorFlag {
+			color := NONE
+			if statementFound && !hit {
 				color = RED
 			}
+			fmt.Printf("%s%*d \t%s%s\n", color, linenoWidth, lineno, line, NONE)
+		} else {
+			hitmiss := hitPrefix
+			if statementFound && !hit {
+				hitmiss = missPrefix
+			}
+			fmt.Printf("%*d %s\t%s\n", linenoWidth, lineno, hitmiss, line)
 		}
-		fmt.Printf("%s%*d %s\t%s%s\n", color, linenoWidth, lineno, hitmiss, line, NONE)
 	}
 	fmt.Println()
 
