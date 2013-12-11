@@ -33,11 +33,10 @@ Running `gocov report <coverage.json>` will generate a textual
 report from the coverage data output by `gocov convert`. It is
 assumed that the source code has not changed in between.
 
-Output from ```gocov convert``` is printed to stdout so users can
+Output from ```gocov test``` is printed to stdout so users can
 pipe the output to ```gocov report``` to view a summary of the test
 coverage, for example: -
 
-    go test -coverprofile=c.out
     gocov test | gocov report
 
 #### gocov annotate
