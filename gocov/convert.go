@@ -31,26 +31,30 @@ import (
 	"code.google.com/p/go.tools/cover"
 
 	"github.com/axw/gocov"
+	"github.com/axw/gocov/gocovutil"
 )
 
-func convertProfiles(filename string) error {
-	profiles, err := cover.ParseProfiles(filename)
-	if err != nil {
-		return err
-	}
-	c := converter{
-		packages: make(map[string]*gocov.Package),
-	}
-	for _, p := range profiles {
-		if err := c.convertProfile(p); err != nil {
+func convertProfiles(filenames ...string) error {
+	var ps gocovutil.Packages
+	for i := range filenames {
+		converter := converter{
+			packages: make(map[string]*gocov.Package),
+		}
+		profiles, err := cover.ParseProfiles(filenames[i])
+		if err != nil {
 			return err
 		}
+		for _, p := range profiles {
+			if err := converter.convertProfile(p); err != nil {
+				return err
+			}
+		}
+
+		for _, pkg := range converter.packages {
+			ps.AddPackage(pkg)
+		}
 	}
-	packages := make([]*gocov.Package, 0, len(c.packages))
-	for _, pkg := range c.packages {
-		packages = append(packages, pkg)
-	}
-	bytes, err := marshalJson(packages)
+	bytes, err := marshalJson(ps)
 	if err != nil {
 		return err
 	}

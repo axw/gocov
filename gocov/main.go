@@ -67,7 +67,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "missing cover profile")
 				os.Exit(1)
 			}
-			if err := convertProfiles(flag.Args()[1]); err != nil {
+			if err := convertProfiles(flag.Args()[1:]...); err != nil {
 				fmt.Fprintln(os.Stderr, "error: %v", err)
 				os.Exit(1)
 			}
