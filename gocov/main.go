@@ -68,7 +68,7 @@ func main() {
 				os.Exit(1)
 			}
 			if err := convertProfiles(flag.Args()[1:]...); err != nil {
-				fmt.Fprintln(os.Stderr, "error: %v", err)
+				fmt.Fprintln(os.Stderr, "error:", err)
 				os.Exit(1)
 			}
 		case "annotate":
@@ -77,7 +77,7 @@ func main() {
 			os.Exit(reportCoverage())
 		case "test":
 			if err := runTests(flag.Args()[1:]); err != nil {
-				fmt.Fprintln(os.Stderr, "error: %v", err)
+				fmt.Fprintln(os.Stderr, "error:", err)
 				os.Exit(1)
 			}
 		default:
