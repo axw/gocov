@@ -28,7 +28,7 @@ import (
 	"go/token"
 	"path/filepath"
 
-	"code.google.com/p/go.tools/cover"
+	"golang.org/x/tools/cover"
 
 	"github.com/axw/gocov"
 	"github.com/axw/gocov/gocovutil"
