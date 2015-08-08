@@ -24,188 +24,77 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 )
 
-func capture(wd string, args []string) ([]byte, error) {
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = nil
-	out := &bytes.Buffer{}
-	cmd.Stdout = out
-	cmd.Stderr = out
-	cmd.Dir = wd
-	err := cmd.Run()
-
-	out2 := &bytes.Buffer{}
-	prefix := "warning: no packages being tested depend on "
-	for _, line := range strings.SplitAfter(out.String(), "\n") {
-		if !strings.HasPrefix(line, prefix) {
-			out2.WriteString(line)
-		}
-	}
-	return out2.Bytes(), err
-}
-
-func readDirNames(dirname string) []string {
-	f, err := os.Open(dirname)
-	if err != nil {
-		return nil
-	}
-	names, err := f.Readdirnames(-1)
-	_ = f.Close()
-	return names
-}
-
-// relToGOPATH returns the path relative to $GOPATH/src.
-func relToGOPATH(p string) (string, error) {
-	for _, gopath := range filepath.SplitList(os.Getenv("GOPATH")) {
-		if len(gopath) == 0 {
-			continue
-		}
-		srcRoot := filepath.Join(gopath, "src")
-		// TODO(maruel): Accept case-insensitivity on Windows/OSX, maybe call
-		// filepath.EvalSymlinks().
-		if !strings.HasPrefix(p, srcRoot) {
-			continue
-		}
-		rel, err := filepath.Rel(srcRoot, p)
-		if err != nil {
-			return "", fmt.Errorf("failed to find relative path from %s to %s", srcRoot, p)
-		}
-		return rel, err
-	}
-	return "", fmt.Errorf("failed to find GOPATH relative directory for %s", p)
-}
-
-// goTestDirs returns the list of directories with '*_test.go' files.
-func goTestDirs(root string) []string {
-	dirsTestsFound := map[string]bool{}
-	var recurse func(dir string)
-	recurse = func(dir string) {
-		for _, f := range readDirNames(dir) {
-			if f[0] == '.' || f[0] == '_' {
-				continue
-			}
-			p := filepath.Join(dir, f)
-			stat, err := os.Stat(p)
-			if err != nil {
-				continue
-			}
-			if stat.IsDir() {
-				recurse(p)
-			} else {
-				if strings.HasSuffix(p, "_test.go") {
-					dirsTestsFound[dir] = true
-				}
-			}
-		}
-	}
-	recurse(root)
-	goTestDirs := make([]string, 0, len(dirsTestsFound))
-	for d := range dirsTestsFound {
-		goTestDirs = append(goTestDirs, d)
-	}
-	sort.Strings(goTestDirs)
-	return goTestDirs
-}
-
-type result struct {
-	out []byte
-	err error
-}
-
-// First argument must be the relative package name.
-func runTests(args []string) error {
-	if len(args) != 0 && strings.HasSuffix(args[0], "...") {
-		return runAllTests(args)
-	}
-	return runOneTest(args)
-}
-
-func runOneTest(args []string) error {
-	coverprofile, err := ioutil.TempFile("", "gocov")
-	if err != nil {
-		return err
-	}
-	coverprofile.Close()
-	defer os.Remove(coverprofile.Name())
-	args = append([]string{
-		"test", "-coverprofile", coverprofile.Name(),
-	}, args...)
-	cmd := exec.Command("go", args...)
+// resolvePackages returns a slice of resolved package names, given a slice of
+// package names that could be relative or recursive.
+func resolvePackages(pkgs []string) ([]string, error) {
+	var buf bytes.Buffer
+	cmd := exec.Command("go", append([]string{"list", "-e"}, pkgs...)...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stderr
+	cmd.Stdout = &buf
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
+	err := cmd.Run()
+	if err != nil {
+		return nil, err
 	}
-	return convertProfiles(coverprofile.Name())
+	var resolvedPkgs []string
+	lines := strings.Split(buf.String(), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) > 0 {
+			resolvedPkgs = append(resolvedPkgs, line)
+		}
+	}
+	return resolvedPkgs, nil
 }
 
-func runAllTests(args []string) (err error) {
-	pkgRoot, _ := os.Getwd()
-	pkg, err2 := relToGOPATH(pkgRoot)
-	if err2 != nil {
-		return err2
-	}
-	// TODO(maruel): This assumes this starts with "./". This is
-	// incorrect,someone could request to run test in a separate package.
-	requestedPath := filepath.Join(pkgRoot, args[0][:len(args[0])-3])
-	testDirs := goTestDirs(requestedPath)
-	if len(testDirs) == 0 {
-		return nil
+func runTests(args []string) error {
+	pkgs, err := resolvePackages(args)
+	if err != nil {
+		return err
 	}
 
-	tmpDir, err2 := ioutil.TempDir("", "gocov")
-	if err2 != nil {
-		return err2
+	tmpDir, err := ioutil.TempDir("", "gocov")
+	if err != nil {
+		return err
 	}
 	defer func() {
-		err2 := os.RemoveAll(tmpDir)
-		if err == nil {
-			err = err2
+		err := os.RemoveAll(tmpDir)
+		if err != nil {
+			log.Printf("failed to clean up temp directory %q", tmpDir)
 		}
 	}()
 
-	// It passes a unique -coverprofile file name, so that all the files can
-	// later be merged into a single file.
-	var wg sync.WaitGroup
-	results := make(chan *result, len(testDirs))
-	for i, td := range testDirs {
-		wg.Add(1)
-		go func(index int, testDir string) {
-			defer wg.Done()
-			args := []string{
-				"go", "test", "-covermode=count", "-coverpkg", pkg + "/...",
-				"-coverprofile", filepath.Join(tmpDir, fmt.Sprintf("test%d.cov", index)),
-			}
-			out, err := capture(testDir, args)
-			results <- &result{out, err}
-		}(i, td)
-	}
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	for result := range results {
-		os.Stderr.Write(result.out)
-		if err == nil && result.err != nil {
-			err = result.err
+	// Unique -coverprofile file names are used so that all the files can be
+	// later merged into a single file.
+	for i, pkg := range pkgs {
+		coverFile := filepath.Join(tmpDir, fmt.Sprintf("test%d.cov", i))
+		cmd := exec.Command("go", "test", pkg,
+			"-coverprofile", coverFile)
+		cmd.Stdin = nil
+		// Write all test command output to stderr so as not to interfere with
+		// the JSON coverage output.
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			return err
 		}
 	}
 
-	// Merge the profiles. Sums all the counts.
-	// Format is "file.go:XX.YY,ZZ.II J K"
-	// J is number of statements, K is count.
-	files, err2 := filepath.Glob(filepath.Join(tmpDir, "test*.cov"))
-	if err2 != nil {
-		return err2
+	// Packages without tests will not produce a coverprofile; only pick up the
+	// ones that were created.
+	files, err := filepath.Glob(filepath.Join(tmpDir, "test*.cov"))
+	if err != nil {
+		return err
 	}
+
+	// Merge the profiles.
 	return convertProfiles(files...)
 }
