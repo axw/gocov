@@ -54,8 +54,21 @@ func resolvePackages(pkgs []string) ([]string, error) {
 	return resolvedPkgs, nil
 }
 
+func splitPkgsFlags(args []string) ([]string, []string) {
+	var pkgs, flags []string
+	for _, arg := range args {
+		if len(arg) > 0 && arg[0] == '-' {
+			flags = append(flags, arg)
+		} else {
+			pkgs = append(pkgs, arg)
+		}
+	}
+	return pkgs, flags
+}
+
 func runTests(args []string) error {
-	pkgs, err := resolvePackages(args)
+	pkgs, testFlags := splitPkgsFlags(args)
+	pkgs, err := resolvePackages(pkgs)
 	if err != nil {
 		return err
 	}
@@ -75,8 +88,8 @@ func runTests(args []string) error {
 	// later merged into a single file.
 	for i, pkg := range pkgs {
 		coverFile := filepath.Join(tmpDir, fmt.Sprintf("test%d.cov", i))
-		cmd := exec.Command("go", "test", pkg,
-			"-coverprofile", coverFile)
+		cmdArgs := append([]string{"test", pkg, "-coverprofile", coverFile}, testFlags...)
+		cmd := exec.Command("go", cmdArgs...)
 		cmd.Stdin = nil
 		// Write all test command output to stderr so as not to interfere with
 		// the JSON coverage output.
