@@ -55,15 +55,14 @@ func resolvePackages(pkgs []string) ([]string, error) {
 }
 
 func splitPkgsFlags(args []string) ([]string, []string) {
-	var pkgs, flags []string
-	for _, arg := range args {
-		if len(arg) > 0 && arg[0] == '-' {
-			flags = append(flags, arg)
-		} else {
-			pkgs = append(pkgs, arg)
+	flagIndex := len(args)
+	for i := range args {
+		if len(args[i]) > 0 && args[i][0] == '-' {
+			flagIndex = i
+			break
 		}
 	}
-	return pkgs, flags
+	return args[:flagIndex], args[flagIndex:]
 }
 
 func runTests(args []string) error {
