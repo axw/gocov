@@ -21,27 +21,92 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 )
 
+// resolvePackages returns a slice of resolved package names, given a slice of
+// package names that could be relative or recursive.
+func resolvePackages(pkgs []string) ([]string, error) {
+	var buf bytes.Buffer
+	cmd := exec.Command("go", append([]string{"list", "-e"}, pkgs...)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = &buf
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		return nil, err
+	}
+	var resolvedPkgs []string
+	lines := strings.Split(buf.String(), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) > 0 {
+			resolvedPkgs = append(resolvedPkgs, line)
+		}
+	}
+	return resolvedPkgs, nil
+}
+
+func splitPkgsFlags(args []string) ([]string, []string) {
+	flagIndex := len(args)
+	for i := range args {
+		if len(args[i]) > 0 && args[i][0] == '-' {
+			flagIndex = i
+			break
+		}
+	}
+	return args[:flagIndex], args[flagIndex:]
+}
+
 func runTests(args []string) error {
-	coverprofile, err := ioutil.TempFile("", "gocov")
+	pkgs, testFlags := splitPkgsFlags(args)
+	pkgs, err := resolvePackages(pkgs)
 	if err != nil {
 		return err
 	}
-	coverprofile.Close()
-	defer os.Remove(coverprofile.Name())
-	args = append([]string{
-		"test", "-coverprofile", coverprofile.Name(),
-	}, args...)
-	cmd := exec.Command("go", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+
+	tmpDir, err := ioutil.TempDir("", "gocov")
+	if err != nil {
 		return err
 	}
-	return convertProfiles(coverprofile.Name())
+	defer func() {
+		err := os.RemoveAll(tmpDir)
+		if err != nil {
+			log.Printf("failed to clean up temp directory %q", tmpDir)
+		}
+	}()
+
+	// Unique -coverprofile file names are used so that all the files can be
+	// later merged into a single file.
+	for i, pkg := range pkgs {
+		coverFile := filepath.Join(tmpDir, fmt.Sprintf("test%d.cov", i))
+		cmdArgs := append([]string{"test", pkg, "-coverprofile", coverFile}, testFlags...)
+		cmd := exec.Command("go", cmdArgs...)
+		cmd.Stdin = nil
+		// Write all test command output to stderr so as not to interfere with
+		// the JSON coverage output.
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			return err
+		}
+	}
+
+	// Packages without tests will not produce a coverprofile; only pick up the
+	// ones that were created.
+	files, err := filepath.Glob(filepath.Join(tmpDir, "test*.cov"))
+	if err != nil {
+		return err
+	}
+
+	// Merge the profiles.
+	return convertProfiles(files...)
 }
