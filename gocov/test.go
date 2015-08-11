@@ -29,6 +29,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/axw/gocov/gocov/internal/testflag"
 )
 
 // resolvePackages returns a slice of resolved package names, given a slice of
@@ -54,19 +56,8 @@ func resolvePackages(pkgs []string) ([]string, error) {
 	return resolvedPkgs, nil
 }
 
-func splitPkgsFlags(args []string) ([]string, []string) {
-	flagIndex := len(args)
-	for i := range args {
-		if len(args[i]) > 0 && args[i][0] == '-' {
-			flagIndex = i
-			break
-		}
-	}
-	return args[:flagIndex], args[flagIndex:]
-}
-
 func runTests(args []string) error {
-	pkgs, testFlags := splitPkgsFlags(args)
+	pkgs, testFlags := testflag.Split(args)
 	pkgs, err := resolvePackages(pkgs)
 	if err != nil {
 		return err
