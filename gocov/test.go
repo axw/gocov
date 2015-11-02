@@ -78,7 +78,7 @@ func runTests(args []string) error {
 	// later merged into a single file.
 	for i, pkg := range pkgs {
 		coverFile := filepath.Join(tmpDir, fmt.Sprintf("test%d.cov", i))
-		cmdArgs := append([]string{"test", pkg, "-coverprofile", coverFile}, testFlags...)
+		cmdArgs := append([]string{"test", "-coverprofile", coverFile, pkg}, testFlags...)
 		cmd := exec.Command("go", cmdArgs...)
 		cmd.Stdin = nil
 		// Write all test command output to stderr so as not to interfere with
