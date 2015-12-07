@@ -40,6 +40,7 @@ var testFlagDefn = []*testFlagSpec{
 	{name: "bench"},
 	{name: "benchmem", isBool: true},
 	{name: "benchtime"},
+	{name: "covermode"},
 	{name: "cpu"},
 	{name: "cpuprofile"},
 	{name: "memprofile"},
