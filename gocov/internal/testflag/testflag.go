@@ -72,7 +72,7 @@ var testFlagDefn = []*testFlagSpec{
 
 // Split processes the arguments , separating flags and package
 // names as done by "go test".
-func Split(args []string) (packageNames, passToTest []string) {
+func Split(args []string) (packageNames, passToTest []string, passToBin []string) {
 	inPkg := false
 	for i := 0; i < len(args); i++ {
 		if !strings.HasPrefix(args[i], "-") {
@@ -101,14 +101,18 @@ func Split(args []string) (packageNames, passToTest []string) {
 				// make non-nil: we have seen the empty package list
 				packageNames = []string{}
 			}
-			passToTest = append(passToTest, args[i])
+			if len(packageNames) > 0 {
+				passToBin = append(passToBin, args[i])
+			} else {
+				passToTest = append(passToTest, args[i])
+			}
 			continue
 		}
 
 		passToTest = append(passToTest, args[i:i+n]...)
 		i += n - 1
 	}
-	return packageNames, passToTest
+	return packageNames, passToTest, passToBin
 }
 
 // parseTestFlag sees if argument i is a known flag and returns its

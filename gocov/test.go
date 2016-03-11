@@ -57,7 +57,7 @@ func resolvePackages(pkgs []string) ([]string, error) {
 }
 
 func runTests(args []string) error {
-	pkgs, testFlags := testflag.Split(args)
+	pkgs, testFlags, binFlags := testflag.Split(args)
 	pkgs, err := resolvePackages(pkgs)
 	if err != nil {
 		return err
@@ -78,8 +78,11 @@ func runTests(args []string) error {
 	// later merged into a single file.
 	for i, pkg := range pkgs {
 		coverFile := filepath.Join(tmpDir, fmt.Sprintf("test%d.cov", i))
-		cmdArgs := append([]string{"test", "-coverprofile", coverFile}, pkg)
-		cmdArgs = append(cmdArgs, testFlags...)
+		cmdArgs := append([]string{"test", "-coverprofile", coverFile}, testFlags...)
+		cmdArgs = append(cmdArgs, pkg)
+		cmdArgs = append(cmdArgs, "-args")
+		cmdArgs = append(cmdArgs, binFlags...)
+		log.Print("Running: go", cmdArgs)
 		cmd := exec.Command("go", cmdArgs...)
 		cmd.Stdin = nil
 		// Write all test command output to stderr so as not to interfere with
