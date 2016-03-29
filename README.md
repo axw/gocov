@@ -57,6 +57,3 @@ A simple helper tool for generating HTML output from gocov.
 A simple helper tool for generating XML output in Cobertura format for CIs like Jenkins and others from gocov. 
 
 > Use to integrate with [Codecov](https://codecov.io) continuous code coverage tracking system.
-
-[goveralls](https://github.com/mattn/goveralls):
-Go integration for Coveralls.io continuous code coverage tracking system.
