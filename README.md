@@ -55,5 +55,3 @@ A simple helper tool for generating HTML output from gocov.
 
 [gocov-xml](https://github.com/AlekSi/gocov-xml):
 A simple helper tool for generating XML output in Cobertura format for CIs like Jenkins and others from gocov. 
-
-> Use to integrate with [Codecov](https://codecov.io) continuous code coverage tracking system.
