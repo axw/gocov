@@ -111,9 +111,7 @@ func (c *converter) convertProfile(p *cover.Profile) error {
 	// For each profile block in the file, find the statement(s) it
 	// covers and increment the Reached field(s).
 	blocks := p.Blocks
-	for len(stmts) > 0 {
-		s := stmts[0]
-		stmts = stmts[1:]
+	for _, s := range stmts {
 		for i, b := range blocks {
 			if b.StartLine > s.endLine || (b.StartLine == s.endLine && b.StartCol >= s.endCol) {
 				// Past the end of the statement
