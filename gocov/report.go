@@ -101,18 +101,7 @@ func (r *report) clear() {
 	r.packages = nil
 }
 
-// PrintReport prints a coverage report to the given writer.
-func printReport(w io.Writer, r *report) {
-	w = tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
-	//fmt.Fprintln(w, "Package\tFunction\tStatements\t")
-	//fmt.Fprintln(w, "-------\t--------\t---------\t")
-	for _, pkg := range r.packages {
-		printPackage(w, pkg)
-		fmt.Fprintln(w)
-	}
-}
-
-func printPackage(w io.Writer, pkg *gocov.Package) {
+func functionReports(pkg *gocov.Package) reportFunctionList {
 	functions := make(reportFunctionList, len(pkg.Functions))
 	for i, fn := range pkg.Functions {
 		reached := 0
@@ -123,6 +112,46 @@ func printPackage(w io.Writer, pkg *gocov.Package) {
 		}
 		functions[i] = reportFunction{fn, reached}
 	}
+
+	return functions
+
+}
+
+// printTotalCoverage outputs the combined coverage for each
+// package
+func (r *report) printTotalCoverage(w io.Writer) {
+	var totalStatements, totalReached int
+
+	for _, pkg := range r.packages {
+		functions := functionReports(pkg)
+		sort.Sort(reverse{functions})
+
+		for _, fn := range functions {
+			reached := fn.statementsReached
+			totalStatements += len(fn.Statements)
+			totalReached += reached
+		}
+	}
+
+	coveragePercentage := float64(totalReached) / float64(totalStatements) * 100
+	fmt.Fprintf(w, "Total Coverage: %.2f%% (%d/%d)", coveragePercentage, totalReached, totalStatements)
+	fmt.Fprintln(w)
+}
+
+// PrintReport prints a coverage report to the given writer.
+func printReport(w io.Writer, r *report) {
+	w = tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
+	//fmt.Fprintln(w, "Package\tFunction\tStatements\t")
+	//fmt.Fprintln(w, "-------\t--------\t---------\t")
+	for _, pkg := range r.packages {
+		printPackage(w, pkg)
+		fmt.Fprintln(w)
+	}
+	r.printTotalCoverage(w)
+}
+
+func printPackage(w io.Writer, pkg *gocov.Package) {
+	functions := functionReports(pkg)
 	sort.Sort(reverse{functions})
 
 	var longestFunctionName int
