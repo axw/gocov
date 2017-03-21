@@ -101,6 +101,8 @@ func (r *report) clear() {
 	r.packages = nil
 }
 
+// functionReports returns the packages functions as an array of
+// reportFunction objects with the statements reached calculated
 func functionReports(pkg *gocov.Package) reportFunctionList {
 	functions := make(reportFunctionList, len(pkg.Functions))
 	for i, fn := range pkg.Functions {
