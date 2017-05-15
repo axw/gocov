@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/axw/gocov/gocov/internal/testflag"
+	"runtime"
 )
 
 // resolvePackages returns a slice of resolved package names, given a slice of
@@ -76,6 +77,9 @@ func runTests(args []string) error {
 
 	// Unique -coverprofile file names are used so that all the files can be
 	// later merged into a single file.
+	commandChan := make(chan *exec.Cmd, len(pkgs))
+	responseChan := make(chan error, len(pkgs))
+	doneChan := make(chan bool)
 	for i, pkg := range pkgs {
 		coverFile := filepath.Join(tmpDir, fmt.Sprintf("test%d.cov", i))
 		cmdArgs := append([]string{"test", "-coverprofile", coverFile}, testFlags...)
@@ -86,11 +90,23 @@ func runTests(args []string) error {
 		// the JSON coverage output.
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
-		err := cmd.Run()
+
+		commandChan <- cmd
+	}
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go runTest(commandChan, responseChan, doneChan)
+	}
+
+	for _, _ = range pkgs {
+		err := <-responseChan
 		if err != nil {
+			close(doneChan)
 			return err
 		}
 	}
+
+	close(doneChan)
 
 	// Packages without tests will not produce a coverprofile; only pick up the
 	// ones that were created.
@@ -101,4 +117,15 @@ func runTests(args []string) error {
 
 	// Merge the profiles.
 	return convertProfiles(files...)
+}
+
+func runTest(jobChan chan *exec.Cmd, resultChan chan error, doneChan chan bool) {
+	for {
+		select {
+		case cmd := <-jobChan:
+			resultChan <- cmd.Run()
+		case <-doneChan:
+			return
+		}
+	}
 }
