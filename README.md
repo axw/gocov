@@ -2,7 +2,7 @@
 
 Coverage reporting tool for The Go Programming Language
 
-[![Build Status](https://drone.io/github.com/axw/gocov/status.png)](https://drone.io/github.com/axw/gocov/latest)
+[![Build Status](https://travis-ci.org/axw/gocov.svg?branch=master)](https://travis-ci.org/axw/gocov)
 
 ## Installation
 
