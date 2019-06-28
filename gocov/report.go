@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -136,6 +137,9 @@ func (r *report) printTotalCoverage(w io.Writer) {
 	}
 
 	coveragePercentage := float64(totalReached) / float64(totalStatements) * 100
+	if math.IsNaN(coveragePercentage) {
+		coveragePercentage = 0
+	}
 	fmt.Fprintf(w, "Total Coverage: %.2f%% (%d/%d)", coveragePercentage, totalReached, totalStatements)
 	fmt.Fprintln(w)
 }
