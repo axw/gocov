@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/axw/gocov"
@@ -41,8 +42,8 @@ func usage() {
 	os.Exit(2)
 }
 
-func marshalJson(packages []*gocov.Package) ([]byte, error) {
-	return json.Marshal(struct{ Packages []*gocov.Package }{packages})
+func marshalJson(w io.Writer, packages []*gocov.Package) error {
+	return json.NewEncoder(w).Encode(struct{ Packages []*gocov.Package }{packages})
 }
 
 func unmarshalJson(data []byte) (packages []*gocov.Package, err error) {
