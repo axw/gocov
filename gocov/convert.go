@@ -26,16 +26,23 @@ import (
 	"go/build"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
-
-	"golang.org/x/tools/cover"
+	"strings"
 
 	"github.com/axw/gocov"
 	"github.com/axw/gocov/gocovutil"
+	"golang.org/x/tools/cover"
 )
 
+type packagesCache map[string]*build.Package
+
 func convertProfiles(filenames ...string) error {
-	var ps gocovutil.Packages
+	var (
+		ps       gocovutil.Packages
+		packages = make(packagesCache)
+	)
+
 	for i := range filenames {
 		converter := converter{
 			packages: make(map[string]*gocov.Package),
@@ -45,7 +52,7 @@ func convertProfiles(filenames ...string) error {
 			return err
 		}
 		for _, p := range profiles {
-			if err := converter.convertProfile(p); err != nil {
+			if err := converter.convertProfile(packages, p); err != nil {
 				return err
 			}
 		}
@@ -54,11 +61,9 @@ func convertProfiles(filenames ...string) error {
 			ps.AddPackage(pkg)
 		}
 	}
-	bytes, err := marshalJson(ps)
-	if err != nil {
+	if err := marshalJson(os.Stdout, ps); err != nil {
 		return err
 	}
-	fmt.Println(string(bytes))
 	return nil
 }
 
@@ -72,8 +77,8 @@ type statement struct {
 	*StmtExtent
 }
 
-func (c *converter) convertProfile(p *cover.Profile) error {
-	file, pkgpath, err := findFile(p.FileName)
+func (c *converter) convertProfile(packages packagesCache, p *cover.Profile) error {
+	file, pkgpath, err := findFile(packages, p.FileName)
 	if err != nil {
 		return err
 	}
@@ -130,15 +135,20 @@ func (c *converter) convertProfile(p *cover.Profile) error {
 }
 
 // findFile finds the location of the named file in GOROOT, GOPATH etc.
-func findFile(file string) (filename string, pkgpath string, err error) {
+func findFile(packages packagesCache, file string) (filename, pkgpath string, err error) {
 	dir, file := filepath.Split(file)
 	if dir != "" {
-		dir = dir[:len(dir)-1] // drop trailing '/'
+		dir = strings.TrimSuffix(dir, "/")
 	}
-	pkg, err := build.Import(dir, ".", build.FindOnly)
-	if err != nil {
-		return "", "", fmt.Errorf("can't find %q: %v", file, err)
+	pkg, ok := packages[dir]
+	if !ok {
+		pkg, err = build.Import(dir, ".", build.FindOnly)
+		if err != nil {
+			return "", "", fmt.Errorf("can't find %q: %w", file, err)
+		}
+		packages[dir] = pkg
 	}
+
 	return filepath.Join(pkg.Dir, file), pkg.ImportPath, nil
 }
 
