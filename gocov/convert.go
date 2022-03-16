@@ -189,6 +189,30 @@ type FuncVisitor struct {
 	funcs []*FuncExtent
 }
 
+func functionName(f *ast.FuncDecl) string {
+	name := f.Name.Name
+	if f.Recv == nil {
+		return name
+	} else {
+		// Function name is prepended with "T." if there is a receiver, where
+		// T is the type of the receiver, dereferenced if it is a pointer.
+		return exprName(f.Recv.List[0].Type) + "." + name
+	}
+}
+
+func exprName(x ast.Expr) string {
+	switch y := x.(type) {
+	case *ast.StarExpr:
+		return exprName(y.X)
+	case *ast.IndexExpr:
+		return fmt.Sprintf("%s[%s]", exprName(y.X), exprName(y.Index))
+	case *ast.Ident:
+		return y.Name
+	default:
+		return ""
+	}
+}
+
 // Visit implements the ast.Visitor interface.
 func (v *FuncVisitor) Visit(node ast.Node) ast.Visitor {
 	var body *ast.BlockStmt
@@ -198,18 +222,7 @@ func (v *FuncVisitor) Visit(node ast.Node) ast.Visitor {
 		body = n.Body
 	case *ast.FuncDecl:
 		body = n.Body
-		name = n.Name.Name
-		// Function name is prepended with "T." if there is a receiver, where
-		// T is the type of the receiver, dereferenced if it is a pointer.
-		if n.Recv != nil {
-			field := n.Recv.List[0]
-			switch recv := field.Type.(type) {
-			case *ast.StarExpr:
-				name = recv.X.(*ast.Ident).Name + "." + name
-			case *ast.Ident:
-				name = recv.Name + "." + name
-			}
-		}
+		name = functionName(n)
 	}
 	if body != nil {
 		start := v.fset.Position(node.Pos())
