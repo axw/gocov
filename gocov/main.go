@@ -28,6 +28,7 @@ import (
 	"os"
 
 	"github.com/axw/gocov"
+	"github.com/axw/gocov/gocov/convert"
 )
 
 func usage() {
@@ -68,10 +69,12 @@ func main() {
 				fmt.Fprintln(os.Stderr, "missing cover profile")
 				os.Exit(1)
 			}
-			if err := convertProfiles(flag.Args()[1:]...); err != nil {
+			out, err := convert.ConvertProfiles(flag.Args()[1:]...)
+			if err != nil {
 				fmt.Fprintln(os.Stderr, "error:", err)
 				os.Exit(1)
 			}
+			os.Stdout.Write(out)
 		case "annotate":
 			os.Exit(annotateSource())
 		case "report":
