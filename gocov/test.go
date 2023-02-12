@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/axw/gocov/gocov/convert"
 	"github.com/axw/gocov/gocov/internal/testflag"
 )
 
@@ -100,5 +101,7 @@ func runTests(args []string) error {
 	}
 
 	// Merge the profiles.
-	return convertProfiles(files...)
+	out, err := convert.ConvertProfiles(files...)
+	os.Stdout.Write(out)
+	return err
 }

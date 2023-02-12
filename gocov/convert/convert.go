@@ -18,15 +18,17 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 
-package main
+package convert
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
-	"os"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -35,9 +37,13 @@ import (
 	"golang.org/x/tools/cover"
 )
 
+func marshalJson(w io.Writer, packages []*gocov.Package) error {
+	return json.NewEncoder(w).Encode(struct{ Packages []*gocov.Package }{packages})
+}
+
 type packagesCache map[string]*build.Package
 
-func convertProfiles(filenames ...string) error {
+func ConvertProfiles(filenames ...string) ([]byte, error) {
 	var (
 		ps       gocovutil.Packages
 		packages = make(packagesCache)
@@ -49,11 +55,11 @@ func convertProfiles(filenames ...string) error {
 		}
 		profiles, err := cover.ParseProfiles(filenames[i])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, p := range profiles {
 			if err := converter.convertProfile(packages, p); err != nil {
-				return err
+				return nil, err
 			}
 		}
 
@@ -61,10 +67,11 @@ func convertProfiles(filenames ...string) error {
 			ps.AddPackage(pkg)
 		}
 	}
-	if err := marshalJson(os.Stdout, ps); err != nil {
-		return err
+	buf := bytes.Buffer{}
+	if err := marshalJson(&buf, ps); err != nil {
+		return nil, err
 	}
-	return nil
+	return buf.Bytes(), nil
 }
 
 type converter struct {
