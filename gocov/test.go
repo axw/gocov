@@ -23,6 +23,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -32,26 +33,53 @@ import (
 
 	"github.com/axw/gocov/gocov/convert"
 	"github.com/axw/gocov/gocov/internal/testflag"
+	"golang.org/x/mod/modfile"
 )
+
+func isFileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
+}
 
 // resolvePackages returns a slice of resolved package names, given a slice of
 // package names that could be relative or recursive.
 func resolvePackages(pkgs []string) ([]string, error) {
-	var buf bytes.Buffer
-	cmd := exec.Command("go", append([]string{"list", "-e"}, pkgs...)...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = &buf
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		return nil, err
-	}
 	var resolvedPkgs []string
-	lines := strings.Split(buf.String(), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if len(line) > 0 {
-			resolvedPkgs = append(resolvedPkgs, line)
+	if len(pkgs) == 0 && !isFileExists("go.mod") && isFileExists("go.work") {
+		goWork, err := os.Open("go.work")
+		if err != nil {
+			return resolvedPkgs, err
+		}
+		content, err := io.ReadAll(goWork)
+		if err := goWork.Close(); err != nil {
+			panic(err)
+		}
+		workFile, err := modfile.ParseWork("go.work", content, nil)
+		if err != nil {
+			return resolvedPkgs, err
+		}
+		for _, use := range workFile.Use {
+			resolvedPkgs = append(resolvedPkgs, use.Path)
+		}
+	} else {
+		var buf bytes.Buffer
+		cmd := exec.Command("go", append([]string{"list", "-e"}, pkgs...)...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = &buf
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			return nil, err
+		}
+		lines := strings.Split(buf.String(), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if len(line) > 0 {
+				resolvedPkgs = append(resolvedPkgs, line)
+			}
 		}
 	}
 	return resolvedPkgs, nil
