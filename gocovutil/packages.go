@@ -1,8 +1,8 @@
 package gocovutil
 
 import (
-	"encoding/json"
 	"github.com/axw/gocov"
+	json "github.com/json-iterator/go"
 	"io/ioutil"
 	"os"
 	"sort"
@@ -80,3 +80,4 @@ func ReadPackages(filenames []string) (ps Packages, err error) {
 	}
 	return ps, nil
 }
+

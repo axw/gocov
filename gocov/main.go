@@ -21,11 +21,13 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
+	json "github.com/json-iterator/go"
 	"io"
+	"log"
 	"os"
+	"runtime/pprof"
 
 	"github.com/axw/gocov"
 	"github.com/axw/gocov/gocov/convert"
@@ -56,9 +58,19 @@ func unmarshalJson(data []byte) (packages []*gocov.Package, err error) {
 	return
 }
 
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
 func main() {
 	flag.Usage = usage
 	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 
 	command := ""
 	if flag.NArg() > 0 {
@@ -92,3 +104,4 @@ func main() {
 		usage()
 	}
 }
+
