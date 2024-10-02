@@ -30,12 +30,18 @@ import (
 	"go/build"
 	"go/parser"
 	"go/token"
+	modfile "golang.org/x/mod/modfile"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/tools/cover"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+)
+
+const (
+	goModFilename = "go.mod"
 )
 
 func marshalJson(w io.Writer, packages []*gocov.Package) error {
@@ -50,6 +56,12 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		packages = make(packagesCache)
 	)
 
+	goModContent, err := os.ReadFile(goModFilename)
+	if err != nil {
+		return nil, fmt.Errorf("getting module name: read go.mod: %w", err)
+	}
+	moduleName := modfile.ModulePath(goModContent)
+
 	for i := range filenames {
 		converter := converter{
 			packages: make(map[string]*gocov.Package),
@@ -63,13 +75,17 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		processedProfiles := make(map[string]interface{})
 		processedDirs := make(map[string]interface{})
 		mu := &sync.Mutex{}
-		funcsChan := make(chan func() error, len(profiles))
+		funcsChan := make(chan func() error)
 		errChan := make(chan error)
+		var workerErr error
 		go func() {
 			for _, p := range profiles {
 				p := p
-				filename := strings.TrimPrefix(p.FileName, "gitlab.ozon.ru/bx/checkout-facade/")
-				filename, _ = filepath.Abs(filename)
+				filename, err := filepath.Abs(strings.TrimPrefix(strings.TrimPrefix(p.FileName, moduleName), "/"))
+				if err != nil {
+					workerErr = fmt.Errorf("getting absolute path of file %q: %w", filename, err)
+					break
+				}
 				_, ok := processedProfiles[filename]
 				if !ok {
 					processedProfiles[filename] = nil
@@ -115,6 +131,10 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to process: %w", err)
 			}
+		}
+
+		if workerErr != nil {
+			return nil, fmt.Errorf("generating report: %w", err)
 		}
 
 		errGr := errgroup.Group{}
@@ -442,4 +462,3 @@ func (v *StmtVisitor) VisitStmt(s ast.Stmt) {
 		v.VisitStmt(s)
 	}
 }
-
