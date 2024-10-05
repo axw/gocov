@@ -251,11 +251,11 @@ func (c *converter) convertProfile(p *cover.Profile, moduleName string) error {
 }
 
 // findFile finds the location of the named file in GOROOT, GOPATH etc.
-// moduleName - gitlab.ozon.ru/re/das/api
-// importPath - gitlab.ozon.ru/re/das/api/internal/clients
-// packageFileName - gitlab.ozon.ru/re/das/api/internal/clients/redis.go
+// moduleName - github.com/hihoak/gocov
+// importPath - github.com/hihoak/gocov/convert
+// packageFileName - github.com/hihoak/gocov/convert/some.go
 // returns
-// absolute path to redis.go on machine and gitlab.ozon.ru/re/das/api/internal/clients
+// absolute path to some.go on machine and github.com/hihoak/gocov/convert
 func findFile(moduleName, packageFileName string) (string, string) {
 	importPath, _ := path.Split(packageFileName)
 	absPath, _ := filepath.Abs(strings.TrimPrefix(strings.TrimPrefix(packageFileName, moduleName), "/"))
