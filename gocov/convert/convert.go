@@ -22,20 +22,19 @@ package convert
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/axw/gocov"
-	"github.com/axw/gocov/gocovutil"
-	json "github.com/json-iterator/go"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/tools/cover"
 	"io"
 	"path/filepath"
 	"strings"
-	"sync"
+
+	"github.com/axw/gocov"
+	"github.com/axw/gocov/gocovutil"
+	"golang.org/x/tools/cover"
 )
 
 func marshalJson(w io.Writer, packages []*gocov.Package) error {
@@ -53,82 +52,15 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 	for i := range filenames {
 		converter := converter{
 			packages: make(map[string]*gocov.Package),
-			mu:       &sync.RWMutex{},
 		}
 		profiles, err := cover.ParseProfiles(filenames[i])
 		if err != nil {
 			return nil, err
 		}
-
-		processedProfiles := make(map[string]interface{})
-		processedDirs := make(map[string]interface{})
-		mu := &sync.Mutex{}
-		funcsChan := make(chan func() error, len(profiles))
-		errChan := make(chan error)
-		go func() {
-			for _, p := range profiles {
-				p := p
-				filename := strings.TrimPrefix(p.FileName, "gitlab.ozon.ru/bx/checkout-facade/")
-				filename, _ = filepath.Abs(filename)
-				_, ok := processedProfiles[filename]
-				if !ok {
-					processedProfiles[filename] = nil
-					funcsChan <- func() error {
-						if err := converter.fillFindFuncs(mu, filename); err != nil {
-							return fmt.Errorf("fillFindFuncs: %w", err)
-						}
-						return nil
-					}
-				}
-				dir, _ := filepath.Split(p.FileName)
-				_, ok = processedDirs[dir]
-				if !ok {
-					processedDirs[dir] = nil
-					funcsChan <- func() error {
-						if err := converter.fillAllPackages(mu, packages, p); err != nil {
-							return fmt.Errorf("failed to fill all packages: %w", err)
-						}
-						return nil
-					}
-				}
-			}
-			close(funcsChan)
-		}()
-
-		wg := &sync.WaitGroup{}
-		for idx := 0; idx < 10; idx++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for f := range funcsChan {
-					errChan <- f()
-				}
-			}()
-		}
-
-		go func() {
-			wg.Wait()
-			close(errChan)
-		}()
-
-		for err := range errChan {
-			if err != nil {
-				return nil, fmt.Errorf("failed to process: %w", err)
-			}
-		}
-
-		errGr := errgroup.Group{}
 		for _, p := range profiles {
-			p := p
-			errGr.Go(func() error {
-				if err := converter.convertProfile(mu, packages, p); err != nil {
-					return fmt.Errorf("failed to process concurrently: %w", err)
-				}
-				return nil
-			})
-		}
-		if err := errGr.Wait(); err != nil {
-			return nil, fmt.Errorf("convert profiles: %w", err)
+			if err := converter.convertProfile(packages, p); err != nil {
+				return nil, err
+			}
 		}
 
 		for _, pkg := range converter.packages {
@@ -144,7 +76,6 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 
 type converter struct {
 	packages map[string]*gocov.Package
-	mu       *sync.RWMutex
 }
 
 // wrapper for gocov.Statement
@@ -153,50 +84,24 @@ type statement struct {
 	*StmtExtent
 }
 
-var cacheFindFuncs = make(map[string][]*FuncExtent)
-
-func (c *converter) fillAllPackages(mu *sync.Mutex, packages packagesCache, p *cover.Profile) error {
-	_, pkgpath, err := findFile(mu, packages, p.FileName, true)
+func (c *converter) convertProfile(packages packagesCache, p *cover.Profile) error {
+	file, pkgpath, err := findFile(packages, p.FileName)
 	if err != nil {
 		return err
 	}
-
-	mu.Lock()
 	pkg := c.packages[pkgpath]
 	if pkg == nil {
-		pkg = &gocov.Package{Name: pkgpath, Mu: &sync.Mutex{}}
+		pkg = &gocov.Package{Name: pkgpath}
 		c.packages[pkgpath] = pkg
-	}
-	mu.Unlock()
-	return nil
-}
-
-func (c *converter) fillFindFuncs(mu *sync.Mutex, filename string) error {
-	extents, err := findFuncs(filename)
-	if err != nil {
-		return err
-	}
-
-	mu.Lock()
-	cacheFindFuncs[filename] = extents
-	mu.Unlock()
-	return nil
-}
-
-func (c *converter) convertProfile(mu *sync.Mutex, packages packagesCache, p *cover.Profile) error {
-	file, pkgpath, err := findFile(mu, packages, p.FileName, false)
-	if err != nil {
-		return err
-	}
-	pkg, ok := c.packages[pkgpath]
-	if !ok {
-		return fmt.Errorf("not found package: %s", pkgpath)
 	}
 	// Find function and statement extents; create corresponding
 	// gocov.Functions and gocov.Statements, and keep a separate
 	// slice of gocov.Statements so we can match them with profile
 	// blocks.
-	extents := cacheFindFuncs[file]
+	extents, err := findFuncs(file)
+	if err != nil {
+		return err
+	}
 	var stmts []statement
 	for _, fe := range extents {
 		f := &gocov.Function{
@@ -213,9 +118,7 @@ func (c *converter) convertProfile(mu *sync.Mutex, packages packagesCache, p *co
 			f.Statements = append(f.Statements, s.Statement)
 			stmts = append(stmts, s)
 		}
-		pkg.Mu.Lock()
 		pkg.Functions = append(pkg.Functions, f)
-		pkg.Mu.Unlock()
 	}
 	// For each profile block in the file, find the statement(s) it
 	// covers and increment the Reached field(s).
@@ -239,22 +142,18 @@ func (c *converter) convertProfile(mu *sync.Mutex, packages packagesCache, p *co
 }
 
 // findFile finds the location of the named file in GOROOT, GOPATH etc.
-func findFile(mu *sync.Mutex, packages packagesCache, file string, write bool) (filename, pkgpath string, err error) {
+func findFile(packages packagesCache, file string) (filename, pkgpath string, err error) {
 	dir, file := filepath.Split(file)
 	if dir != "" {
 		dir = strings.TrimSuffix(dir, "/")
 	}
-	var pkg *build.Package
-	if !write {
-		pkg = packages[dir]
-	} else {
+	pkg, ok := packages[dir]
+	if !ok {
 		pkg, err = build.Import(dir, ".", build.FindOnly)
 		if err != nil {
 			return "", "", fmt.Errorf("can't find %q: %w", file, err)
 		}
-		mu.Lock()
 		packages[dir] = pkg
-		mu.Unlock()
 	}
 
 	return filepath.Join(pkg.Dir, file), pkg.ImportPath, nil
@@ -442,4 +341,3 @@ func (v *StmtVisitor) VisitStmt(s ast.Stmt) {
 		v.VisitStmt(s)
 	}
 }
-

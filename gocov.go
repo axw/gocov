@@ -23,7 +23,6 @@ package gocov
 
 import (
 	"fmt"
-	"sync"
 )
 
 type Package struct {
@@ -32,7 +31,6 @@ type Package struct {
 
 	// Functions is a list of functions registered with this package.
 	Functions []*Function
-	Mu        *sync.Mutex `json:"-"`
 }
 
 type Function struct {
@@ -115,4 +113,3 @@ func (s *Statement) Accumulate(s2 *Statement) error {
 	s.Reached += s2.Reached
 	return nil
 }
-
