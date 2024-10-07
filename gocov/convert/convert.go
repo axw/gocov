@@ -27,6 +27,7 @@ import (
 	"github.com/axw/gocov/gocovutil"
 	json "github.com/json-iterator/go"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	modfile "golang.org/x/mod/modfile"
@@ -34,7 +35,6 @@ import (
 	"golang.org/x/tools/cover"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -48,9 +48,12 @@ func marshalJson(w io.Writer, packages []*gocov.Package) error {
 	return json.NewEncoder(w).Encode(struct{ Packages []*gocov.Package }{packages})
 }
 
+type packagesCache map[string]*build.Package
+
 func ConvertProfiles(filenames ...string) ([]byte, error) {
 	var (
-		ps gocovutil.Packages
+		ps       gocovutil.Packages
+		packages = make(packagesCache)
 	)
 
 	goModContent, err := os.ReadFile(goModFilename)
@@ -78,17 +81,16 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		go func() {
 			for _, p := range profiles {
 				p := p
-				relativeFilepath := strings.TrimPrefix(strings.TrimPrefix(p.FileName, moduleName), "/")
-				absFilepath, err := filepath.Abs(relativeFilepath)
+				filename, err := filepath.Abs(strings.TrimPrefix(strings.TrimPrefix(p.FileName, moduleName), "/"))
 				if err != nil {
-					workerErr = fmt.Errorf("getting absolute path of file %q: %w", absFilepath, err)
+					workerErr = fmt.Errorf("getting absolute path of file %q: %w", filename, err)
 					break
 				}
-				_, ok := processedProfiles[absFilepath]
+				_, ok := processedProfiles[filename]
 				if !ok {
-					processedProfiles[absFilepath] = nil
+					processedProfiles[filename] = nil
 					funcsChan <- func() error {
-						if err := converter.fillFindFuncs(mu, absFilepath); err != nil {
+						if err := converter.fillFindFuncs(mu, filename); err != nil {
 							return fmt.Errorf("fillFindFuncs: %w", err)
 						}
 						return nil
@@ -99,7 +101,7 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 				if !ok {
 					processedDirs[dir] = nil
 					funcsChan <- func() error {
-						if err := converter.fillAllPackages(mu, p, moduleName); err != nil {
+						if err := converter.fillAllPackages(mu, packages, p); err != nil {
 							return fmt.Errorf("failed to fill all packages: %w", err)
 						}
 						return nil
@@ -139,7 +141,7 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		for _, p := range profiles {
 			p := p
 			errGr.Go(func() error {
-				if err := converter.convertProfile(p, moduleName); err != nil {
+				if err := converter.convertProfile(mu, packages, p); err != nil {
 					return fmt.Errorf("failed to process concurrently: %w", err)
 				}
 				return nil
@@ -173,8 +175,11 @@ type statement struct {
 
 var cacheFindFuncs = make(map[string][]*FuncExtent)
 
-func (c *converter) fillAllPackages(mu *sync.Mutex, p *cover.Profile, moduleName string) error {
-	_, pkgpath := findFile(moduleName, p.FileName)
+func (c *converter) fillAllPackages(mu *sync.Mutex, packages packagesCache, p *cover.Profile) error {
+	_, pkgpath, err := findFile(mu, packages, p.FileName, true)
+	if err != nil {
+		return err
+	}
 
 	mu.Lock()
 	pkg := c.packages[pkgpath]
@@ -198,8 +203,11 @@ func (c *converter) fillFindFuncs(mu *sync.Mutex, filename string) error {
 	return nil
 }
 
-func (c *converter) convertProfile(p *cover.Profile, moduleName string) error {
-	file, pkgpath := findFile(moduleName, p.FileName)
+func (c *converter) convertProfile(mu *sync.Mutex, packages packagesCache, p *cover.Profile) error {
+	file, pkgpath, err := findFile(mu, packages, p.FileName, false)
+	if err != nil {
+		return err
+	}
 	pkg, ok := c.packages[pkgpath]
 	if !ok {
 		return fmt.Errorf("not found package: %s", pkgpath)
@@ -251,15 +259,25 @@ func (c *converter) convertProfile(p *cover.Profile, moduleName string) error {
 }
 
 // findFile finds the location of the named file in GOROOT, GOPATH etc.
-// moduleName - gitlab.ozon.ru/re/das/api
-// importPath - gitlab.ozon.ru/re/das/api/internal/clients
-// packageFileName - gitlab.ozon.ru/re/das/api/internal/clients/redis.go
-// returns
-// absolute path to redis.go on machine and gitlab.ozon.ru/re/das/api/internal/clients
-func findFile(moduleName, packageFileName string) (string, string) {
-	importPath, _ := path.Split(packageFileName)
-	absPath, _ := filepath.Abs(strings.TrimPrefix(strings.TrimPrefix(packageFileName, moduleName), "/"))
-	return absPath, strings.TrimSuffix(importPath, "/")
+func findFile(mu *sync.Mutex, packages packagesCache, file string, write bool) (filename, pkgpath string, err error) {
+	dir, file := filepath.Split(file)
+	if dir != "" {
+		dir = strings.TrimSuffix(dir, "/")
+	}
+	var pkg *build.Package
+	if !write {
+		pkg = packages[dir]
+	} else {
+		pkg, err = build.Import(dir, ".", build.FindOnly)
+		if err != nil {
+			return "", "", fmt.Errorf("can't find %q: %w", file, err)
+		}
+		mu.Lock()
+		packages[dir] = pkg
+		mu.Unlock()
+	}
+
+	return filepath.Join(pkg.Dir, file), pkg.ImportPath, nil
 }
 
 // findFuncs parses the file and returns a slice of FuncExtent descriptors.
