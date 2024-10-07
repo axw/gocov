@@ -28,7 +28,9 @@ import (
 	"go/build"
 	"go/parser"
 	"go/token"
+	"golang.org/x/mod/modfile"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -37,17 +39,32 @@ import (
 	"golang.org/x/tools/cover"
 )
 
+const (
+	goModFilename = "go.mod"
+)
+
 func marshalJson(w io.Writer, packages []*gocov.Package) error {
 	return json.NewEncoder(w).Encode(struct{ Packages []*gocov.Package }{packages})
 }
 
-type packagesCache map[string]*build.Package
+type PackageInfo struct {
+	Dir        string
+	ImportPath string
+}
+
+type packagesCache map[string]PackageInfo
 
 func ConvertProfiles(filenames ...string) ([]byte, error) {
 	var (
 		ps       gocovutil.Packages
 		packages = make(packagesCache)
 	)
+
+	goModContent, err := os.ReadFile(goModFilename)
+	if err != nil {
+		return nil, fmt.Errorf("getting module name: read go.mod: %w", err)
+	}
+	moduleName := modfile.ModulePath(goModContent)
 
 	for i := range filenames {
 		converter := converter{
@@ -58,7 +75,13 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 			return nil, err
 		}
 		for _, p := range profiles {
-			if err := converter.convertProfile(packages, p); err != nil {
+			relativeFilepath := strings.TrimPrefix(strings.TrimPrefix(p.FileName, moduleName), "/")
+			absFilepath, err := filepath.Abs(relativeFilepath)
+			if err != nil {
+				return nil, fmt.Errorf("getting absolute path of file %q in filename %q: %w", absFilepath, i, err)
+			}
+
+			if err := converter.convertProfile(packages, moduleName, p); err != nil {
 				return nil, err
 			}
 		}
@@ -84,10 +107,10 @@ type statement struct {
 	*StmtExtent
 }
 
-func (c *converter) convertProfile(packages packagesCache, p *cover.Profile) error {
-	file, pkgpath, err := findFile(packages, p.FileName)
+func (c *converter) convertProfile(packages packagesCache, moduleName string, p *cover.Profile) error {
+	file, pkgpath, err := findFile(packages, moduleName, p.FileName)
 	if err != nil {
-		return err
+		return fmt.Errorf("finding file %q: %w", p.FileName, err)
 	}
 	pkg := c.packages[pkgpath]
 	if pkg == nil {
@@ -141,20 +164,39 @@ func (c *converter) convertProfile(packages packagesCache, p *cover.Profile) err
 	return nil
 }
 
-// findFile finds the location of the named file in GOROOT, GOPATH etc.
-func findFile(packages packagesCache, file string) (filename, pkgpath string, err error) {
-	dir, file := filepath.Split(file)
-	if dir != "" {
-		dir = strings.TrimSuffix(dir, "/")
+func findFile(packages packagesCache, moduleName, packageFileName string) (string, string, error) {
+	importPath, file := filepath.Split(packageFileName)
+	pkg, ok := packages[importPath]
+	if ok {
+		return filepath.Join(pkg.Dir, file), pkg.ImportPath, nil
 	}
-	pkg, ok := packages[dir]
-	if !ok {
-		pkg, err = build.Import(dir, ".", build.FindOnly)
+
+	var pkgDir, pkgImportPath string
+	if strings.HasPrefix(packageFileName, moduleName) {
+		// lightning fast processing for local module files
+		relativeFilePath := strings.TrimPrefix(strings.TrimPrefix(packageFileName, moduleName), "/")
+		absPath, err := filepath.Abs(relativeFilePath)
+		if err != nil {
+			return "", "", fmt.Errorf("get abs path for file %q: %w", relativeFilePath, err)
+		}
+		pkgDir = filepath.Dir(absPath)
+		pkgImportPath = strings.TrimSuffix(importPath, "/")
+	} else {
+		if importPath != "" {
+			importPath = strings.TrimSuffix(importPath, "/")
+		}
+		pkg, err := build.Import(importPath, ".", build.FindOnly)
 		if err != nil {
 			return "", "", fmt.Errorf("can't find %q: %w", file, err)
 		}
-		packages[dir] = pkg
+		pkgDir, pkgImportPath = pkg.Dir, pkg.ImportPath
 	}
+
+	pkg = PackageInfo{
+		Dir:        pkgDir,
+		ImportPath: pkgImportPath,
+	}
+	packages[importPath] = pkg
 
 	return filepath.Join(pkg.Dir, file), pkg.ImportPath, nil
 }
