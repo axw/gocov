@@ -64,7 +64,7 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("getting module name: read go.mod: %w", err)
 	}
-	moduleName := modfile.ModulePath(goModContent)
+	localModuleName := modfile.ModulePath(goModContent)
 
 	for i := range filenames {
 		converter := converter{
@@ -75,7 +75,7 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 			return nil, err
 		}
 		for _, p := range profiles {
-			if err := converter.convertProfile(packages, moduleName, p); err != nil {
+			if err := converter.convertProfile(packages, localModuleName, p); err != nil {
 				return nil, err
 			}
 		}
@@ -101,8 +101,8 @@ type statement struct {
 	*StmtExtent
 }
 
-func (c *converter) convertProfile(packages packagesCache, moduleName string, p *cover.Profile) error {
-	file, pkgpath, err := findFile(packages, moduleName, p.FileName)
+func (c *converter) convertProfile(packages packagesCache, localModuleName string, p *cover.Profile) error {
+	file, pkgpath, err := findFile(packages, localModuleName, p.FileName)
 	if err != nil {
 		return fmt.Errorf("finding file %q: %w", p.FileName, err)
 	}
@@ -158,6 +158,7 @@ func (c *converter) convertProfile(packages packagesCache, moduleName string, p 
 	return nil
 }
 
+// findFile finds the location of the named file in GOROOT, GOPATH etc.
 func findFile(packages packagesCache, moduleName, packageFileName string) (string, string, error) {
 	importPath, file := filepath.Split(packageFileName)
 	pkg, ok := packages[importPath]
