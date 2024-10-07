@@ -75,12 +75,6 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 			return nil, err
 		}
 		for _, p := range profiles {
-			relativeFilepath := strings.TrimPrefix(strings.TrimPrefix(p.FileName, moduleName), "/")
-			absFilepath, err := filepath.Abs(relativeFilepath)
-			if err != nil {
-				return nil, fmt.Errorf("getting absolute path of file %q in filename %q: %w", absFilepath, i, err)
-			}
-
 			if err := converter.convertProfile(packages, moduleName, p); err != nil {
 				return nil, err
 			}
