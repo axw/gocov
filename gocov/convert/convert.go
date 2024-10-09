@@ -27,6 +27,7 @@ import (
 	"github.com/axw/gocov"
 	"github.com/axw/gocov/gocovutil"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"golang.org/x/tools/cover"
 	goPackages "golang.org/x/tools/go/packages"
@@ -38,11 +39,6 @@ import (
 
 func marshalJson(w io.Writer, packages []*gocov.Package) error {
 	return json.NewEncoder(w).Encode(struct{ Packages []*gocov.Package }{packages})
-}
-
-type PackageInfo struct {
-	Dir        string
-	ImportPath string
 }
 
 func ConvertProfiles(filenames ...string) ([]byte, error) {
@@ -63,30 +59,36 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 			return profiles[i].FileName < profiles[j].FileName
 		})
 
-		//packageNameGoPkgsMap := make(map[string][]*goPackages.Package)
-		//profilePkgsMap := make(map[*cover.Profile][]*goPackages.Package)
-		tempCache := make(map[string][]*goPackages.Package)
-		var prevPackage string
+		mapUniqPackageNames := make(map[string]interface{})
+		uniqPackageNames := make([]string, 0, len(profiles))
 		for _, profile := range profiles {
 			packageName := filepath.Dir(profile.FileName)
 
-			var pkgs []*goPackages.Package
-			if packageName != prevPackage {
-				delete(tempCache, prevPackage)
-				pkgs, err = goPackages.Load(&goPackages.Config{
-					Mode: goPackages.NeedName | goPackages.NeedSyntax | goPackages.NeedTypes | goPackages.NeedCompiledGoFiles,
-				}, packageName)
-				if err != nil {
-					return nil, fmt.Errorf("loading packages for %s: %w", packageName, err)
-				}
-			} else {
-				pkgs = tempCache[packageName]
+			if _, ok := mapUniqPackageNames[packageName]; ok {
+				continue
 			}
 
-			if err := converter.convertPackage(pkgs, profile); err != nil {
-				return nil, err
+			mapUniqPackageNames[packageName] = nil
+			uniqPackageNames = append(uniqPackageNames, packageName)
+		}
+
+		packages, err := goPackages.Load(&goPackages.Config{
+			Mode: goPackages.NeedName | goPackages.NeedCompiledGoFiles,
+		}, uniqPackageNames...)
+		if err != nil {
+			return nil, fmt.Errorf("load packages: %v", err)
+		}
+
+		for _, profile := range profiles {
+			for _, pkg := range packages {
+				for _, compiledGoFile := range pkg.CompiledGoFiles {
+					if strings.HasSuffix(compiledGoFile, profile.FileName) {
+						if err := converter.convertPackage(profile, compiledGoFile, pkg.PkgPath); err != nil {
+							return nil, err
+						}
+					}
+				}
 			}
-			prevPackage = packageName
 		}
 
 		for _, pkg := range converter.packages {
@@ -110,69 +112,55 @@ type statement struct {
 	*StmtExtent
 }
 
-var visitedFunctions = map[string]interface{}{}
+func (c *converter) convertPackage(p *cover.Profile, absFilePath, pkgPath string) error {
+	pkg := c.packages[pkgPath]
+	if pkg == nil {
+		pkg = &gocov.Package{Name: pkgPath}
+		c.packages[pkgPath] = pkg
+	}
+	// Find function and statement extents; create corresponding
+	// gocov.Functions and gocov.Statements, and keep a separate
+	// slice of gocov.Statements so we can match them with profile
+	// blocks.
+	extents, err := findFuncs(absFilePath)
+	if err != nil {
+		return err
+	}
 
-func (c *converter) convertPackage(goPkgs []*goPackages.Package, p *cover.Profile) error {
-	for _, goPkg := range goPkgs {
-		for idx, file := range goPkg.Syntax {
-			pkg := c.packages[goPkg.PkgPath]
-			if pkg == nil {
-				pkg = &gocov.Package{Name: goPkg.PkgPath}
-				c.packages[goPkg.PkgPath] = pkg
+	var stmts []statement
+	for _, fe := range extents {
+		f := &gocov.Function{
+			Name:  fe.name,
+			File:  absFilePath,
+			Start: fe.startOffset,
+			End:   fe.endOffset,
+		}
+		for _, se := range fe.stmts {
+			s := statement{
+				Statement:  &gocov.Statement{Start: se.startOffset, End: se.endOffset},
+				StmtExtent: se,
 			}
-			// Find function and statement extents; create corresponding
-			// gocov.Functions and gocov.Statements, and keep a separate
-			// slice of gocov.Statements so we can match them with profile
-			// blocks.
-			extents, err := findFuncs(file, goPkg.Fset)
-			if err != nil {
-				return err
+			f.Statements = append(f.Statements, s.Statement)
+			stmts = append(stmts, s)
+		}
+		pkg.Functions = append(pkg.Functions, f)
+	}
+	// For each profile block in the file, find the statement(s) it
+	// covers and increment the Reached field(s).
+	blocks := p.Blocks
+	for _, s := range stmts {
+		for i, b := range blocks {
+			if b.StartLine > s.endLine || (b.StartLine == s.endLine && b.StartCol >= s.endCol) {
+				// Past the end of the statement
+				blocks = blocks[i:]
+				break
 			}
-
-			var stmts []statement
-			for _, fe := range extents {
-				if strings.HasPrefix(fe.name, "@") {
-					continue
-				}
-				if _, ok := visitedFunctions[goPkg.PkgPath+fe.name]; ok {
-					continue
-				}
-
-				f := &gocov.Function{
-					Name:  fe.name,
-					File:  goPkg.CompiledGoFiles[idx],
-					Start: fe.startOffset,
-					End:   fe.endOffset,
-				}
-				for _, se := range fe.stmts {
-					s := statement{
-						Statement:  &gocov.Statement{Start: se.startOffset, End: se.endOffset},
-						StmtExtent: se,
-					}
-					f.Statements = append(f.Statements, s.Statement)
-					stmts = append(stmts, s)
-				}
-				visitedFunctions[goPkg.PkgPath+fe.name] = nil
-				pkg.Functions = append(pkg.Functions, f)
+			if b.EndLine < s.startLine || (b.EndLine == s.startLine && b.EndCol <= s.startCol) {
+				// Before the beginning of the statement
+				continue
 			}
-			// For each profile block in the file, find the statement(s) it
-			// covers and increment the Reached field(s).
-			blocks := p.Blocks
-			for _, s := range stmts {
-				for i, b := range blocks {
-					if b.StartLine > s.endLine || (b.StartLine == s.endLine && b.StartCol >= s.endCol) {
-						// Past the end of the statement
-						blocks = blocks[i:]
-						break
-					}
-					if b.EndLine < s.startLine || (b.EndLine == s.startLine && b.EndCol <= s.startCol) {
-						// Before the beginning of the statement
-						continue
-					}
-					s.Reached += int64(b.Count)
-					break
-				}
-			}
+			s.Reached += int64(b.Count)
+			break
 		}
 	}
 
@@ -180,7 +168,12 @@ func (c *converter) convertPackage(goPkgs []*goPackages.Package, p *cover.Profil
 }
 
 // findFuncs parses the file and returns a slice of FuncExtent descriptors.
-func findFuncs(parsedFile *ast.File, fset *token.FileSet) ([]*FuncExtent, error) {
+func findFuncs(name string) ([]*FuncExtent, error) {
+	fset := token.NewFileSet()
+	parsedFile, err := parser.ParseFile(fset, name, nil, 0)
+	if err != nil {
+		return nil, err
+	}
 	visitor := &FuncVisitor{fset: fset}
 	ast.Walk(visitor, parsedFile)
 	return visitor.funcs, nil
