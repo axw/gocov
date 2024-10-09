@@ -33,7 +33,6 @@ import (
 	goPackages "golang.org/x/tools/go/packages"
 	"io"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -54,10 +53,6 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		sort.Slice(profiles, func(i, j int) bool {
-			return profiles[i].FileName < profiles[j].FileName
-		})
 
 		mapUniqPackageNames := make(map[string]interface{})
 		uniqPackageNames := make([]string, 0, len(profiles))
