@@ -77,7 +77,14 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		for _, profile := range profiles {
 			for _, pkg := range packages {
 				for _, compiledGoFile := range pkg.CompiledGoFiles {
-					if strings.HasSuffix(compiledGoFile, profile.FileName) {
+					// pkg.PkgPath -> 	     github.com/app/internal/service
+					// profile.FileName ->   github.com/app/internal/service/hello.go
+					// strings.TrimPrefix(strings.TrimPrefix(profile.FileName, pkg.PkgPath), "/") -> hello.go
+					// and because in go package we can't have files with similar names we can find absolute path
+					// compiledGoFile -> /usr/admin/repos/app-local/internal/service/hello.go
+					// _, file = filepath.Split(compiledGoFile) -> hello.go
+					_, compiledGoFileName := filepath.Split(compiledGoFile)
+					if strings.TrimPrefix(strings.TrimPrefix(profile.FileName, pkg.PkgPath), "/") == compiledGoFileName {
 						if err := converter.convertPackage(profile, compiledGoFile, pkg.PkgPath); err != nil {
 							return nil, err
 						}
