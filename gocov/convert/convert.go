@@ -32,6 +32,7 @@ import (
 	"golang.org/x/tools/cover"
 	goPackages "golang.org/x/tools/go/packages"
 	"io"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -74,20 +75,19 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 			return nil, fmt.Errorf("load packages: %v", err)
 		}
 
+		pkgmap := make(map[string]*goPackages.Package, len(packages))
+		for _, pkg := range packages {
+			pkgmap[pkg.PkgPath] = pkg
+		}
+
 		for _, profile := range profiles {
-			for _, pkg := range packages {
-				for _, compiledGoFile := range pkg.CompiledGoFiles {
-					// pkg.PkgPath -> 	     github.com/app/internal/service
-					// profile.FileName ->   github.com/app/internal/service/hello.go
-					// strings.TrimPrefix(strings.TrimPrefix(profile.FileName, pkg.PkgPath), "/") -> hello.go
-					// and because in go package we can't have files with similar names we can find absolute path
-					// compiledGoFile -> /usr/admin/repos/app-local/internal/service/hello.go
-					// _, file = filepath.Split(compiledGoFile) -> hello.go
-					_, compiledGoFileName := filepath.Split(compiledGoFile)
-					if strings.TrimPrefix(strings.TrimPrefix(profile.FileName, pkg.PkgPath), "/") == compiledGoFileName {
-						if err := converter.convertPackage(profile, compiledGoFile, pkg.PkgPath); err != nil {
-							return nil, err
-						}
+			pkgpath, filename := path.Split(profile.FileName)
+			pkgpath = strings.TrimSuffix(pkgpath, "/")
+			pkg := pkgmap[pkgpath]
+			for _, abspath := range pkg.CompiledGoFiles {
+				if filepath.Base(abspath) == filename {
+					if err := converter.convertProfile(profile, abspath, pkg.PkgPath); err != nil {
+						return nil, fmt.Errorf("convert profile %s: %w", profile.FileName, err)
 					}
 				}
 			}
@@ -114,7 +114,7 @@ type statement struct {
 	*StmtExtent
 }
 
-func (c *converter) convertPackage(p *cover.Profile, absFilePath, pkgPath string) error {
+func (c *converter) convertProfile(p *cover.Profile, absFilePath, pkgPath string) error {
 	pkg := c.packages[pkgPath]
 	if pkg == nil {
 		pkg = &gocov.Package{Name: pkgPath}
