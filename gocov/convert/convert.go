@@ -58,7 +58,7 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		mapUniqPackageNames := make(map[string]interface{})
 		uniqPackageNames := make([]string, 0, len(profiles))
 		for _, profile := range profiles {
-			packageName := filepath.Dir(profile.FileName)
+			packageName := path.Dir(profile.FileName)
 
 			if _, ok := mapUniqPackageNames[packageName]; ok {
 				continue
