@@ -24,29 +24,26 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/build"
-	"go/parser"
-	"go/token"
-	"io"
-	"path/filepath"
-	"strings"
-
 	"github.com/axw/gocov"
 	"github.com/axw/gocov/gocovutil"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"golang.org/x/tools/cover"
+	goPackages "golang.org/x/tools/go/packages"
+	"io"
+	"path"
+	"path/filepath"
+	"strings"
 )
 
 func marshalJson(w io.Writer, packages []*gocov.Package) error {
 	return json.NewEncoder(w).Encode(struct{ Packages []*gocov.Package }{packages})
 }
 
-type packagesCache map[string]*build.Package
-
 func ConvertProfiles(filenames ...string) ([]byte, error) {
 	var (
-		ps       gocovutil.Packages
-		packages = make(packagesCache)
+		ps gocovutil.Packages
 	)
 
 	for i := range filenames {
@@ -57,9 +54,42 @@ func ConvertProfiles(filenames ...string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, p := range profiles {
-			if err := converter.convertProfile(packages, p); err != nil {
-				return nil, err
+
+		mapUniqPackageNames := make(map[string]interface{})
+		uniqPackageNames := make([]string, 0, len(profiles))
+		for _, profile := range profiles {
+			packageName := path.Dir(profile.FileName)
+
+			if _, ok := mapUniqPackageNames[packageName]; ok {
+				continue
+			}
+
+			mapUniqPackageNames[packageName] = nil
+			uniqPackageNames = append(uniqPackageNames, packageName)
+		}
+
+		packages, err := goPackages.Load(&goPackages.Config{
+			Mode: goPackages.NeedName | goPackages.NeedCompiledGoFiles,
+		}, uniqPackageNames...)
+		if err != nil {
+			return nil, fmt.Errorf("load packages: %v", err)
+		}
+
+		pkgmap := make(map[string]*goPackages.Package, len(packages))
+		for _, pkg := range packages {
+			pkgmap[pkg.PkgPath] = pkg
+		}
+
+		for _, profile := range profiles {
+			pkgpath, filename := path.Split(profile.FileName)
+			pkgpath = strings.TrimSuffix(pkgpath, "/")
+			pkg := pkgmap[pkgpath]
+			for _, abspath := range pkg.CompiledGoFiles {
+				if filepath.Base(abspath) == filename {
+					if err := converter.convertProfile(profile, abspath, pkg.PkgPath); err != nil {
+						return nil, fmt.Errorf("convert profile %s: %w", profile.FileName, err)
+					}
+				}
 			}
 		}
 
@@ -84,29 +114,26 @@ type statement struct {
 	*StmtExtent
 }
 
-func (c *converter) convertProfile(packages packagesCache, p *cover.Profile) error {
-	file, pkgpath, err := findFile(packages, p.FileName)
-	if err != nil {
-		return err
-	}
-	pkg := c.packages[pkgpath]
+func (c *converter) convertProfile(p *cover.Profile, absFilePath, pkgPath string) error {
+	pkg := c.packages[pkgPath]
 	if pkg == nil {
-		pkg = &gocov.Package{Name: pkgpath}
-		c.packages[pkgpath] = pkg
+		pkg = &gocov.Package{Name: pkgPath}
+		c.packages[pkgPath] = pkg
 	}
 	// Find function and statement extents; create corresponding
 	// gocov.Functions and gocov.Statements, and keep a separate
 	// slice of gocov.Statements so we can match them with profile
 	// blocks.
-	extents, err := findFuncs(file)
+	extents, err := findFuncs(absFilePath)
 	if err != nil {
 		return err
 	}
+
 	var stmts []statement
 	for _, fe := range extents {
 		f := &gocov.Function{
 			Name:  fe.name,
-			File:  file,
+			File:  absFilePath,
 			Start: fe.startOffset,
 			End:   fe.endOffset,
 		}
@@ -138,25 +165,8 @@ func (c *converter) convertProfile(packages packagesCache, p *cover.Profile) err
 			break
 		}
 	}
+
 	return nil
-}
-
-// findFile finds the location of the named file in GOROOT, GOPATH etc.
-func findFile(packages packagesCache, file string) (filename, pkgpath string, err error) {
-	dir, file := filepath.Split(file)
-	if dir != "" {
-		dir = strings.TrimSuffix(dir, "/")
-	}
-	pkg, ok := packages[dir]
-	if !ok {
-		pkg, err = build.Import(dir, ".", build.FindOnly)
-		if err != nil {
-			return "", "", fmt.Errorf("can't find %q: %w", file, err)
-		}
-		packages[dir] = pkg
-	}
-
-	return filepath.Join(pkg.Dir, file), pkg.ImportPath, nil
 }
 
 // findFuncs parses the file and returns a slice of FuncExtent descriptors.
